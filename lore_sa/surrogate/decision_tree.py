@@ -32,12 +32,15 @@ from sklearn.model_selection import HalvingGridSearchCV
 
 class DecisionTreeSurrogate(Surrogate):
 
-    def __init__(self, kind=None, preprocessing=None, class_values=None, multi_label: bool = False,
-                 one_vs_rest: bool = False, cv=5, prune_tree: bool = False, ):
+    def __init__(self, kind=None, preprocessing=None):
         super().__init__(kind, preprocessing)
         self.dt = None
+    
+    def merge_trees(self):
+        pass
 
-    def train(self, Z, Yb, weights=None, ):
+    def train(self, Z, Yb, weights=None, class_values=None, multi_label: bool = False, one_vs_rest: bool = False, cv=5,
+              prune_tree: bool = False):
         """
 
         :param Z: The training input samples
@@ -50,7 +53,7 @@ class DecisionTreeSurrogate(Surrogate):
         :param [bool] prune_tree:
         :return:
         """
-        self.dt = DecisionTreeClassifier()
+        self.dt = DecisionTreeClassifier()            
         if prune_tree is True:
             param_list = {'min_samples_split': [0.01, 0.05, 0.1, 0.2, 3, 2],
                           'min_samples_leaf': [0.001, 0.01, 0.05, 0.1, 2, 4],
@@ -60,16 +63,16 @@ class DecisionTreeSurrogate(Surrogate):
                           'max_features': [0.2, 1, 5, 'auto', 'sqrt', 'log2']
                           }
 
-            # if multi_label is False or (multi_label is True and one_vs_rest is True):
-            #     if len(class_values) == 2 or (multi_label and one_vs_rest):
-            #         scoring = 'precision'
-            #     else:
-            #         scoring = 'precision_macro'
-            # else:
-            scoring = 'precision_micro'
+            if multi_label is False or (multi_label is True and one_vs_rest is True):
+                if len(class_values) == 2 or (multi_label and one_vs_rest):
+                    scoring = 'precision'
+                else:
+                    scoring = 'precision_macro'
+            else:
+                scoring = 'precision_samples'
 
             dt_search = sklearn.model_selection.HalvingGridSearchCV(self.dt, param_grid=param_list, scoring=scoring,
-                                                                    cv=self.cv, n_jobs=-1)
+                                                                    cv=cv, n_jobs=-1)
             logger.info('Search the best estimator')
             logger.info('Start time: {0}'.format(datetime.datetime.now()))
             dt_search.fit(Z, Yb, sample_weight=weights)
@@ -79,8 +82,6 @@ class DecisionTreeSurrogate(Surrogate):
             self.prune_duplicate_leaves(self.dt)
         else:
             self.dt.fit(Z, Yb)
-
-        self.fidelity = self.dt.score(Z, Yb)
 
         return self.dt
 
@@ -218,7 +219,7 @@ class DecisionTreeSurrogate(Surrogate):
         # Y = self.dt.predict(neighborhood_dataset.df)
 
         x_dict = vector2dict(z, feature_names)
-        # select the subset of ```neighborhood_train_X``` that have a classification different from the input x
+        # select the subset of  neighborhood_train_X that have a classification different from the input x
         Z1 = neighborhood_train_X[np.where(neighborhood_train_Y != predicted_class)] # Se filtran las instancias en el vecindario que tienen una clase diferente a la de x.
 
         # We search for the shortest rule among those that support the elements in Z1
@@ -553,7 +554,7 @@ class SuperTree(Surrogate):
                     return predict_datum(next_node, x)
             return np.array([predict_datum(self, el) for el in X])
 
-    def rec_buildTree(self, dt: DecisionTreeClassifier, feature_used): # Recorre internamente el árbol de decisión y lo convierte en un árbol de decisión personalizado. Así podemos manipular los árboles fácilmente después (porque no dependes de la estructura rígida de sklearn)
+    def rec_buildTree(self, dt: DecisionTreeClassifier, feature_used):
         nodes = dt.tree_.__getstate__()['nodes']
         values = dt.tree_.__getstate__()['values']
 
@@ -567,8 +568,8 @@ class SuperTree(Surrogate):
 
         return createNode(0)
 
-    def mergeDecisionTrees(self, roots, num_classes, level=0): 
-        if all(r.is_leaf for r in roots): # Combinar etiquetas y crear hoja con la clase más votada
+    def mergeDecisionTrees(self, roots, num_classes, level=0):
+        if all(r.is_leaf for r in roots):
             votes = [np.argmax(r.labels) for r in roots]
             val, cou = np.unique(votes, return_counts=True)
             labels = np.zeros(num_classes)
@@ -591,14 +592,14 @@ class SuperTree(Surrogate):
                     self.root = super_node
                     return super_node
 
-        Xf = val[np.argmax(cou)] # ← feature más común
+        Xf = val[np.argmax(cou)]
         If = sorted(set(r.thresh for r in roots if r.feat == Xf))
         If = np.array([[-np.inf] + If + [np.inf]]).T
         If = np.hstack([If[:-1], If[1:]])
 
         branches = []
         for r in roots:
-            branches.append(self.computeBranch(r, If, Xf, verbose=False)) # Divide los árboles según esos intervalos
+            branches.append(self.computeBranch(r, If, Xf, verbose=False))
 
         children = []
         for j in range(len(If)):
@@ -607,7 +608,7 @@ class SuperTree(Surrogate):
 
         super_node = self.SuperNode(feat_num=Xf, intervals=If[:, 1], children=children, level=level)
         self.root = super_node
-        return super_node # Al final tienes un árbol combinado en forma de SuperNode que contiene:
+        return super_node
 
     class SuperNode:
         def __init__(self, feat_num=None, intervals=None, weights=None, labels=None, children=None, is_leaf=False, level=0):

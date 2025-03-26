@@ -62,7 +62,7 @@ class Lore(object):
         Creates a new instance of the LORE method.
 
 
-        :param bbox: The black box model to be explained wrapped in a ``AbstractBBox`` object.
+        :param bbox: The black box model to be explained wrapped in a `AbstractBBox object.
         :param dataset:
         :param encoder:
         :param generator:
@@ -86,8 +86,8 @@ class Lore(object):
         """
         
         [z] = self.encoder.encode([x])
-        # generate a neighborhood of instances around the projected instance `z`
-        neighbour = self.generator.generate(z, num_instances, self.descriptor, self.encoder)
+
+        neighbour = self.generator.generate(z, num_instances, self.descriptor, self.encoder) # Z(i) ← genetic(x, fitnessx=, b, K);        También está incluido: el generador crea vecinos de clases distintas Z(i) ← genetic(x, fitnessx≠, b, K);         Z(i) ← Z= ∪ Z≠;  En el generador se concatenan ambos tipos de vecinos
         dec_neighbor = self.encoder.decode(neighbour)
 
         neighb_train_X = dec_neighbor[:, :]
@@ -95,17 +95,17 @@ class Lore(object):
         neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1)).squeeze()
 
 
-        self.surrogate.train(neighbour, neighb_train_yb)  # Se entrena un conjunto de árboles sobre subconjuntos aleatorios del vecindario. --> train del EnsembleDecisionTreeSurrogate
+        self.surrogate.train(neighbour, neighb_train_yb)  # Entrena múltiples árboles si es un ensamble
 
-        # get the rule for the instance `z`, decode using the encoder class
+        # get the rule for the instance z, decode using the encoder class
         # rule = self.surrogate.get_rule(z, self.encoder)
 
         if hasattr(self.surrogate, 'merge_trees'): 
-            merged_tree = self.surrogate.merge_trees() # --> Devuelve un supertree en merge_trees de EnsembleDecisionTreeSurrogate
+            merged_tree = self.surrogate.merge_trees()
             if hasattr(merged_tree, 'get_rule'):
                 rule = merged_tree.get_rule(z, self.encoder) # OBTENEMOS LAS REGLAS DEL SUPERTREE
             else:
-                rule = self.surrogate.get_rule(z, self.encoder) # --> en caso de que no tenga el merged tree se usa el surrogate normal
+                rule = self.surrogate.get_rule(z, self.encoder)
         else:
             rule = self.surrogate.get_rule(z, self.encoder)
         # print('rule', rule)
@@ -129,6 +129,7 @@ class Lore(object):
             # 'x': x.tolist(),
             'rule': rule.to_dict(),
             'counterfactuals': [c.to_dict() for c in crules],
+            'merged_tree': merged_tree,
         }
 
 
@@ -140,7 +141,7 @@ class TabularRandomGeneratorLore(Lore):
             Creates a new instance of the LORE method.
 
 
-            :param bbox: The black box model to be explained wrapped in a ``AbstractBBox`` object.
+            :param bbox: The black box model to be explained wrapped in a `AbstractBBox object.
             :param dataset:
             :param encoder:
             :param generator:
@@ -162,7 +163,7 @@ class TabularGeneticGeneratorLore(Lore):
             Creates a new instance of the LORE method.
 
 
-            :param bbox: The black box model to be explained wrapped in a ``AbstractBBox`` object.
+            :param bbox: The black box model to be explained wrapped in a `AbstractBBox object.
             :param dataset:
             :param encoder:
             :param generator:
