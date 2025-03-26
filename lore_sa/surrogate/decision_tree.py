@@ -554,7 +554,7 @@ class SuperTree(Surrogate):
                     return predict_datum(next_node, x)
             return np.array([predict_datum(self, el) for el in X])
 
-    def rec_buildTree(self, dt: DecisionTreeClassifier, feature_used):
+    def rec_buildTree(self, dt: DecisionTreeClassifier, feature_used): # Recorre internamente el árbol de decisión y lo convierte en un árbol de decisión personalizado. Así podemos manipular los árboles fácilmente después (porque no dependes de la estructura rígida de sklearn)
         nodes = dt.tree_.__getstate__()['nodes']
         values = dt.tree_.__getstate__()['values']
 
@@ -569,7 +569,7 @@ class SuperTree(Surrogate):
         return createNode(0)
 
     def mergeDecisionTrees(self, roots, num_classes, level=0):
-        if all(r.is_leaf for r in roots):
+        if all(r.is_leaf for r in roots): # Combinar etiquetas y crear hoja con la clase más votada
             votes = [np.argmax(r.labels) for r in roots]
             val, cou = np.unique(votes, return_counts=True)
             labels = np.zeros(num_classes)
@@ -592,14 +592,14 @@ class SuperTree(Surrogate):
                     self.root = super_node
                     return super_node
 
-        Xf = val[np.argmax(cou)]
+        Xf = val[np.argmax(cou)] # ← feature más común
         If = sorted(set(r.thresh for r in roots if r.feat == Xf))
         If = np.array([[-np.inf] + If + [np.inf]]).T
         If = np.hstack([If[:-1], If[1:]])
 
         branches = []
         for r in roots:
-            branches.append(self.computeBranch(r, If, Xf, verbose=False))
+            branches.append(self.computeBranch(r, If, Xf, verbose=False)) # Divide los árboles según esos intervalos
 
         children = []
         for j in range(len(If)):
@@ -608,7 +608,7 @@ class SuperTree(Surrogate):
 
         super_node = self.SuperNode(feat_num=Xf, intervals=If[:, 1], children=children, level=level)
         self.root = super_node
-        return super_node
+        return super_node # Al final tienes un árbol combinado en forma de SuperNode que contiene:
 
     class SuperNode:
         def __init__(self, feat_num=None, intervals=None, weights=None, labels=None, children=None, is_leaf=False, level=0):

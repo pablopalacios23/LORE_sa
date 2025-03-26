@@ -327,7 +327,7 @@ class GeneticGenerator(LegacyGeneticGenerator):
     pruning the generation around a fitness function based on proximity to the instance to explain
     """
     def __init__(self, bbox=None, dataset=None, encoder=None, ocr=0.1,
-                 alpha1=0.5, alpha2=0.5, metric=neuclidean, ngen=30, mutpb=0.2, cxpb=0.5,
+                 alpha1=0.5, alpha2=0.5, metric=neuclidean, ngen=100, mutpb=0.2, cxpb=0.5,
                  tournsize=3, halloffame_ratio=0.1, random_seed=None):
         """
 
@@ -458,7 +458,7 @@ class GeneticGenerator(LegacyGeneticGenerator):
 
         population, logbook = GeneticGenerator.eaSimple(population, toolbox, cxpb=self.cxpb, mutpb=self.mutpb,
                                                   ngen=self.ngen, stats=stats, halloffame=halloffame,
-                                                  verbose=False)
+                                                  verbose=True)
 
         return population, halloffame, logbook
 

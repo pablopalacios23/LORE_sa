@@ -95,17 +95,17 @@ class Lore(object):
         neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1)).squeeze()
 
 
-        self.surrogate.train(neighbour, neighb_train_yb)  # Entrena múltiples árboles si es un ensamble
+        self.surrogate.train(neighbour, neighb_train_yb)  # Se entrena un conjunto de árboles sobre subconjuntos aleatorios del vecindario. --> train del EnsembleDecisionTreeSurrogate
 
         # get the rule for the instance z, decode using the encoder class
         # rule = self.surrogate.get_rule(z, self.encoder)
 
         if hasattr(self.surrogate, 'merge_trees'): 
-            merged_tree = self.surrogate.merge_trees()
+            merged_tree = self.surrogate.merge_trees() # --> Devuelve un supertree en merge_trees de EnsembleDecisionTreeSurrogate
             if hasattr(merged_tree, 'get_rule'):
                 rule = merged_tree.get_rule(z, self.encoder) # OBTENEMOS LAS REGLAS DEL SUPERTREE
             else:
-                rule = self.surrogate.get_rule(z, self.encoder)
+                rule = self.surrogate.get_rule(z, self.encoder) # --> en caso de que no tenga el merged tree se usa el surrogate normal
         else:
             rule = self.surrogate.get_rule(z, self.encoder)
         # print('rule', rule)
