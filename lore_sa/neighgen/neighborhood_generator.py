@@ -4,6 +4,7 @@ import warnings
 import numpy as np
 
 import numpy as np
+import pandas as pd
 
 from lore_sa.bbox import AbstractBBox
 from lore_sa.dataset import Dataset

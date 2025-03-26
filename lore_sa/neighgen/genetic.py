@@ -285,6 +285,41 @@ class LegacyGeneticGenerator(NeighborhoodGenerator):
         return evaluation,
 
 
+'''Algoritmo 2: genetic(x, fitness, b, K)
+Este está implementado en lore_sa/neighgen/genetic.py, dentro de GeneticGenerator y LegacyGeneticGenerator.
+
+Correspondencias:
+
+P0 ← (x | ∀1,..., n); i ← 0;
+    → toolbox = self.setup_toolbox(z, fitness_fn, population_size)
+      population = toolbox.population(n=population_size)
+
+while i < g do
+    → for gen in range(1, ngen + 1):  # En la función eaSimple()
+
+P′ ← crossover(Pi, pc);
+    → offspring = varAnd(offspring, toolbox, cxpb, mutpb)  # Mezcla y muta
+
+P′′ ← mutate(P′, pm, K);
+    → varAnd incluye mutate() con probabilidad `mutpb` usando self.mutate()
+
+S ← evaluate(P′′, fitness, b);
+    → fitnesses = toolbox.evaluate(invalid_ind)
+
+Pi+1 ← select(P′′, S);
+    → offspring = toolbox.select(population, len(population))
+      population[:] = offspring
+
+i ← i + 1
+    → implícito en el bucle for de eaSimple()
+
+Z ← Pi
+    → return population
+
+return Z;
+    → return population, logbook
+'''
+
 
 class GeneticGenerator(LegacyGeneticGenerator):
     """
@@ -345,7 +380,7 @@ class GeneticGenerator(LegacyGeneticGenerator):
         num_samples_neq = num_instances - num_samples_eq
 
         # generate the instances for the same class
-        toolbox_eq = self.setup_toolbox(z, self.population_fitness_equal(z), num_samples_eq)
+        toolbox_eq = self.setup_toolbox(z, self.population_fitness_equal(z), num_samples_eq) # Se crea la población inicial para vecinos con misma clase (Z_eq) y se inicializa i implícitamente dentro de fit.
         population_eq, halloffame_eq, logbook_eq = self.fit(toolbox_eq, num_samples_eq)
         Z_eq = self.add_halloffame(population_eq, halloffame_eq)
         # print(logbook_eq)
@@ -364,7 +399,7 @@ class GeneticGenerator(LegacyGeneticGenerator):
         # the first element is the input instance
 
         Z[0] = new_x
-        return Z
+        return Z  # Z es la combinación de Z_eq y Z_noteq, balanceada.
 
     # def add_halloffame(self, population, halloffame):
     #     fitness_values = [p.fitness.wvalues[0] for p in population]
@@ -472,14 +507,14 @@ class GeneticGenerator(LegacyGeneticGenerator):
         # Begin the generational process
         for gen in range(1, ngen + 1):
             # Select the next generation individuals
-            offspring = toolbox.select(population, len(population))
+            offspring = toolbox.select(population, len(population)) # Selección por torneo (selTournament) para formar nueva población.
 
             # Vary the pool of individuals
-            offspring = varAnd(offspring, toolbox, cxpb, mutpb)
+            offspring = varAnd(offspring, toolbox, cxpb, mutpb) # Aquí se mezcla y muta a la vez con operadores de DEAP. cxpb = probabilidad de cruce.
 
             # Evaluate the individuals with an invalid fitness
             invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
-            fitnesses = toolbox.evaluate(invalid_ind)
+            fitnesses = toolbox.evaluate(invalid_ind)  # Usa population_fitness_equal o notequal, que dependen del black-box b.
             for ind, fit in zip(invalid_ind, fitnesses):
                 ind.fitness.values = (fit, )
 

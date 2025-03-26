@@ -117,8 +117,7 @@ class TabularDataset(Dataset):
             for k in descriptor[type]:
                 if k == self.class_name:
                     if type == 'numeric':
-                        raise Exception("ERR: target column cannot be continuous. Please, set a categorical column as target."
-                                        "You can force the content of target column by discretize it.")
+                         logger.warning("WARNING: The target column is numeric. Ensure that the model can handle regression tasks.")
                     descriptor['target'] = {k: descriptor[type][k]}
                     descriptor[type].pop(k)
                     return descriptor

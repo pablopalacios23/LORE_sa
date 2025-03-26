@@ -31,3 +31,11 @@ class Surrogate(ABC):
                                  encoder: EncDec = None,
                                  filter_crules=None, constraints: dict = None, unadmittible_features: list = None):
         pass
+
+    @abstractmethod
+    def merge_trees(self):
+        """
+        Optional: For ensemble models to merge trees into a SuperTree.
+        Override in subclasses.
+        """
+        raise NotImplementedError("This surrogate does not support merging trees.")
