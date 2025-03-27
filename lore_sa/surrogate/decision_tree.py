@@ -30,6 +30,10 @@ from lore_sa.surrogate.surrogate import Surrogate
 from sklearn.model_selection import HalvingGridSearchCV
 
 
+import hashlib
+import pickle
+
+
 class DecisionTreeSurrogate(Surrogate):
 
     def __init__(self, kind=None, preprocessing=None):
@@ -430,6 +434,8 @@ class EnsembleDecisionTreeSurrogate(Surrogate):
         supertree = SuperTree()
         roots = [supertree.rec_buildTree(tree, list(range(tree.n_features_in_))) for tree in self.trees]
         supertree.mergeDecisionTrees(roots, num_classes=self.trees[0].n_classes_)
+        supertree.prune_redundant_leaves_full()  # ✅ método mejorado
+        supertree.merge_equal_class_leaves()  # 👈 Añade esta línea
         return supertree
 
 
@@ -443,6 +449,89 @@ class SuperTree(Surrogate):
 
     def merge_trees(self):
         return self.root
+    
+    def prune_redundant_leaves_full(self): # eliminar nodos redundantes (cuando todos los hijos de un nodo predicen lo mismo)
+        print("🔧 Iniciando poda completa de SuperTree")
+
+        def prune(node):
+            if node.is_leaf or not node.children:
+                return node
+
+            node.children = [prune(child) for child in node.children]
+
+            print(f"👀 Evaluando poda en nodo nivel {node.level}")
+            for idx, child in enumerate(node.children):
+                print(f"   └─ Hijo {idx}: predicción={np.argmax(child.labels)}, labels={child.labels}")
+
+            if all(child.is_leaf for child in node.children):
+                predictions = [np.argmax(child.labels) for child in node.children]
+                if all(p == predictions[0] for p in predictions):
+                    print(f"✅ 🌿 Poda realizada en nivel {node.level}: clase común = {predictions[0]}")
+                    combined = np.sum([child.labels for child in node.children], axis=0)
+                    return self.SuperNode(is_leaf=True, labels=combined, level=node.level)
+
+            return node
+
+        if self.root:
+            self.root = prune(self.root)
+        print("✅ Poda completa finalizada")
+
+    def merge_equal_class_leaves(self): # fusionar hojas adyacentes con la misma clase (aunque no vengan del mismo padre)
+        print("🔁 Buscando ramas adyacentes que puedan fusionarse")
+
+        def merge_adjacent(node):
+            if node.is_leaf or not node.children:
+                return node
+
+            node.children = [merge_adjacent(child) for child in node.children]
+
+            new_children = []
+            new_intervals = []
+            current_group = []
+            current_interval = []
+
+            for i, child in enumerate(node.children):
+                if child.is_leaf:
+                    if not current_group:
+                        current_group = [child]
+                        current_interval = [node.intervals[i - 1] if i > 0 else -float("inf"), node.intervals[i]]
+                    else:
+                        prev_class = np.argmax(current_group[0].labels)
+                        curr_class = np.argmax(child.labels)
+                        if curr_class == prev_class:
+                            current_group.append(child)
+                            current_interval[1] = node.intervals[i]
+                        else:
+                            merged = self._fuse_group(current_group, node.level + 1)
+                            new_children.append(merged)
+                            new_intervals.append(current_interval[1])
+                            current_group = [child]
+                            current_interval = [node.intervals[i - 1], node.intervals[i]]
+                else:
+                    if current_group:
+                        merged = self._fuse_group(current_group, node.level + 1)
+                        new_children.append(merged)
+                        new_intervals.append(current_interval[1])
+                        current_group = []
+                    new_children.append(child)
+                    new_intervals.append(node.intervals[i])
+
+            if current_group:
+                merged = self._fuse_group(current_group, node.level + 1)
+                new_children.append(merged)
+                new_intervals.append(current_interval[1])
+
+            node.children = new_children
+            node.intervals = new_intervals
+            return node
+
+        if self.root:
+            self.root = merge_adjacent(self.root)
+        print("✅ Fusión de hojas adyacentes completada")
+
+    def _fuse_group(self, group, level):
+        total = np.sum([g.labels for g in group], axis=0)
+        return self.SuperNode(is_leaf=True, labels=total, level=level)
 
     def get_rule(self, z, encoder):
         feature_names = list(encoder.encoded_features.values())
