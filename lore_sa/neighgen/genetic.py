@@ -458,7 +458,7 @@ class GeneticGenerator(LegacyGeneticGenerator):
 
         population, logbook = GeneticGenerator.eaSimple(population, toolbox, cxpb=self.cxpb, mutpb=self.mutpb,
                                                   ngen=self.ngen, stats=stats, halloffame=halloffame,
-                                                  verbose=True)
+                                                  verbose=False)
 
         return population, halloffame, logbook
 

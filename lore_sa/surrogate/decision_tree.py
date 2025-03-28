@@ -459,14 +459,14 @@ class SuperTree(Surrogate):
 
             node.children = [prune(child) for child in node.children]
 
-            print(f"👀 Evaluando poda en nodo nivel {node.level}")
-            for idx, child in enumerate(node.children):
-                print(f"   └─ Hijo {idx}: predicción={np.argmax(child.labels)}, labels={child.labels}")
+            # print(f"👀 Evaluando poda en nodo nivel {node.level}")
+            # for idx, child in enumerate(node.children):
+            #     print(f"   └─ Hijo {idx}: predicción={np.argmax(child.labels)}, labels={child.labels}")
 
             if all(child.is_leaf for child in node.children):
                 predictions = [np.argmax(child.labels) for child in node.children]
                 if all(p == predictions[0] for p in predictions):
-                    print(f"✅ 🌿 Poda realizada en nivel {node.level}: clase común = {predictions[0]}")
+                    # print(f"✅ 🌿 Poda realizada en nivel {node.level}: clase común = {predictions[0]}")
                     combined = np.sum([child.labels for child in node.children], axis=0)
                     return self.SuperNode(is_leaf=True, labels=combined, level=node.level)
 
@@ -474,10 +474,10 @@ class SuperTree(Surrogate):
 
         if self.root:
             self.root = prune(self.root)
-        print("✅ Poda completa finalizada")
+        # print("✅ Poda completa finalizada")
 
     def merge_equal_class_leaves(self): # fusionar hojas adyacentes con la misma clase (aunque no vengan del mismo padre)
-        print("🔁 Buscando ramas adyacentes que puedan fusionarse")
+        # print("🔁 Buscando ramas adyacentes que puedan fusionarse")
 
         def merge_adjacent(node):
             if node.is_leaf or not node.children:
@@ -527,7 +527,7 @@ class SuperTree(Surrogate):
 
         if self.root:
             self.root = merge_adjacent(self.root)
-        print("✅ Fusión de hojas adyacentes completada")
+        # print("✅ Fusión de hojas adyacentes completada")
 
     def _fuse_group(self, group, level):
         total = np.sum([g.labels for g in group], axis=0)
