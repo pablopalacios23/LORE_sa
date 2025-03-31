@@ -642,6 +642,42 @@ class SuperTree(Surrogate):
                         next_node = node._left_child
                     return predict_datum(next_node, x)
             return np.array([predict_datum(self, el) for el in X])
+        
+        def to_dict(self):
+            node_dict = {
+                "is_leaf": self.is_leaf,
+                "labels": self.labels.tolist() if self.labels is not None else None,
+                "feat": self.feat,
+                "thresh": self.thresh,
+            }
+            if self._left_child or self._right_child:
+                node_dict["left"] = self._left_child.to_dict() if self._left_child else None
+                node_dict["right"] = self._right_child.to_dict() if self._right_child else None
+            elif self.children:
+                node_dict["children"] = [child.to_dict() for child in self.children]
+                node_dict["intervals"] = self.intervals.tolist()
+            return node_dict
+        
+        @staticmethod
+        def from_dict(d):
+            node = SuperTree.Node(
+                feat_num=d.get("feat"),
+                thresh=d.get("thresh"),
+                labels=np.array(d.get("labels")) if d.get("labels") else None,
+                is_leaf=d.get("is_leaf", False)
+            )
+            if "left" in d or "right" in d:
+                node._left_child = SuperTree.Node.from_dict(d.get("left")) if d.get("left") else None
+                node._right_child = SuperTree.Node.from_dict(d.get("right")) if d.get("right") else None
+                node.children = []
+                if node._left_child:
+                    node.children.append(node._left_child)
+                if node._right_child:
+                    node.children.append(node._right_child)
+            elif "children" in d:
+                node.children = [SuperTree.Node.from_dict(c) for c in d.get("children")]
+                node.intervals = d.get("intervals", [])
+            return node
 
     def rec_buildTree(self, dt: DecisionTreeClassifier, feature_used): # Recorre internamente el árbol de decisión y lo convierte en un árbol de decisión personalizado. Así podemos manipular los árboles fácilmente después (porque no dependes de la estructura rígida de sklearn)
         nodes = dt.tree_.__getstate__()['nodes']
@@ -658,46 +694,69 @@ class SuperTree(Surrogate):
         return createNode(0)
 
     def mergeDecisionTrees(self, roots, num_classes, level=0):
-        if all(r.is_leaf for r in roots): # Combinar etiquetas y crear hoja con la clase más votada
-            votes = [np.argmax(r.labels) for r in roots]
+        # 🔒 Filtrar nodos None por seguridad
+        roots = [r for r in roots if r is not None]
+
+        if not roots:
+            return None  # Nada que combinar
+
+        # ✅ CASO BASE: todos son hojas
+        if all(r.is_leaf for r in roots):
+            votes = [np.argmax(r.labels) for r in roots if r.labels is not None]
             val, cou = np.unique(votes, return_counts=True)
             labels = np.zeros(num_classes)
-            for j, v in enumerate(val):
-                labels[v] = cou[j]
-            super_node = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
-            self.root = super_node
+            for v, c in zip(val, cou):
+                labels[v] = c
+            super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
+            if level == 0:
+                self.root = super_node
             return super_node
 
+        # ✅ FEATURE MÁS COMÚN
         val, cou = np.unique([r.feat for r in roots if r.feat is not None], return_counts=True)
-        if np.sum(cou) < len(roots) / 2:
-            majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
-            if majority:
-                val_out, cou_out = np.unique(majority, return_counts=True)
-                if np.max(cou_out) >= (len(roots) / 2) + 1:
-                    labels = np.zeros(num_classes)
-                    for j, v in enumerate(val_out):
-                        labels[v] = cou_out[j]
-                    super_node = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
-                    self.root = super_node
-                    return super_node
+        if len(val) == 0:
+            # Si no hay nodos internos válidos, usamos la clase mayoritaria
+            majority = [np.argmax(r.labels) for r in roots if r.is_leaf and r.labels is not None]
+            labels = np.zeros(num_classes)
+            for v in majority:
+                labels[v] += 1
+            super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
+            if level == 0:
+                self.root = super_node
+            return super_node
 
-        Xf = val[np.argmax(cou)] # ← feature más común
-        If = sorted(set(r.thresh for r in roots if r.feat == Xf))
-        If = np.array([[-np.inf] + If + [np.inf]]).T
+        Xf = val[np.argmax(cou)]  # feature más común
+
+        # Crear los intervalos de esa feature
+        thresholds = sorted(set(r.thresh for r in roots if r.feat == Xf))
+        If = np.array([[-np.inf] + thresholds + [np.inf]]).T
         If = np.hstack([If[:-1], If[1:]])
 
-        branches = []
-        for r in roots:
-            branches.append(self.computeBranch(r, If, Xf, verbose=False)) # Divide los árboles según esos intervalos
+        # Dividir los árboles en esos intervalos
+        branches = [self.computeBranch(r, If, Xf, verbose=False) for r in roots]
 
+        # Fusionar recursivamente
         children = []
         for j in range(len(If)):
-            child_roots = [b[j] for b in branches]
-            children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1))
+            child_roots = [b[j] for b in branches if b[j] is not None]
+            if child_roots:
+                child = self.mergeDecisionTrees(child_roots, num_classes, level + 1)
+            else:
+                # 🔄 Si no hay subárboles válidos para este intervalo, usar predicción por mayoría
+                labels = np.zeros(num_classes)
+                for r in roots:
+                    if r.is_leaf and r.labels is not None:
+                        labels += r.labels
+                    elif r.labels is not None:
+                        labels[np.argmax(r.labels)] += 1
+                child = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
+            children.append(child)
 
+        # Crear SuperNode final
         super_node = self.SuperNode(feat_num=Xf, intervals=If[:, 1], children=children, level=level)
-        self.root = super_node
-        return super_node # Al final tienes un árbol combinado en forma de SuperNode que contiene:
+        if level == 0:
+            self.root = super_node
+        return super_node
 
     class SuperNode:
         def __init__(self, feat_num=None, intervals=None, weights=None, labels=None, children=None, is_leaf=False, level=0):
