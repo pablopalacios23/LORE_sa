@@ -413,6 +413,8 @@ class EnsembleDecisionTreeSurrogate(Surrogate):
 
     def train(self, Z, Yb):
         self.trees.clear()
+        self.Z = Z              # 👈 guarda vecinos codificados
+        self.Y = Yb             # 👈 guarda etiquetas codificadas
         for _ in range(self.n_estimators):
             Z_sample, Yb_sample = resample(Z, Yb)
             tree = DecisionTreeClassifier()
@@ -430,10 +432,10 @@ class EnsembleDecisionTreeSurrogate(Surrogate):
         return dt_surrogate.get_counterfactual_rules(z, Z, Yb, encoder, **kwargs)
 
     def merge_trees(self):
-        print("✅ merge_trees() fue llamado")
         supertree = SuperTree()
         roots = [supertree.rec_buildTree(tree, list(range(tree.n_features_in_))) for tree in self.trees]
         supertree.mergeDecisionTrees(roots, num_classes=self.trees[0].n_classes_)
+        print("✅ merge_trees() fue llamado")
         supertree.prune_redundant_leaves_full()  # ✅ método mejorado
         supertree.merge_equal_class_leaves()  # 👈 Añade esta línea
         return supertree
