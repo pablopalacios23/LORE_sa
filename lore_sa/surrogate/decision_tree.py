@@ -695,70 +695,77 @@ class SuperTree(Surrogate):
 
         return createNode(0)
 
-    def mergeDecisionTrees(self, roots, num_classes, level=0):
-        # 🔒 Filtrar nodos None por seguridad
+    def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None):
+        indent = "  " * level
         roots = [r for r in roots if r is not None]
 
-        if not roots:
-            return None  # Nada que combinar
+        # print(f"{indent}🔁 Nivel {level}: {len(roots)} nodos a fusionar")
 
-        # ✅ CASO BASE: todos son hojas
+        if not roots:
+            # print(f"{indent}🛑 Sin nodos, retorno None")
+            return None
+
         if all(r.is_leaf for r in roots):
             votes = [np.argmax(r.labels) for r in roots if r.labels is not None]
             val, cou = np.unique(votes, return_counts=True)
             labels = np.zeros(num_classes)
             for v, c in zip(val, cou):
                 labels[v] = c
+            # print(f"{indent}🌿 Todos son hojas → clase mayoritaria: {labels}")
             super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
             if level == 0:
                 self.root = super_node
             return super_node
 
-        # ✅ FEATURE MÁS COMÚN
         val, cou = np.unique([r.feat for r in roots if r.feat is not None], return_counts=True)
         if len(val) == 0:
-            # Si no hay nodos internos válidos, usamos la clase mayoritaria
             majority = [np.argmax(r.labels) for r in roots if r.is_leaf and r.labels is not None]
             labels = np.zeros(num_classes)
             for v in majority:
                 labels[v] += 1
+            # print(f"{indent}⚠️ Sin nodos internos válidos, usando clase mayoría: {labels}")
             super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
             if level == 0:
                 self.root = super_node
             return super_node
 
-        Xf = val[np.argmax(cou)]  # feature más común
+        Xf = val[np.argmax(cou)]
+        fname = feature_names[Xf] if feature_names else f"X_{Xf}"
+        # print(f"{indent}📌 Variable más usada: {fname}")
 
-        # Crear los intervalos de esa feature
         thresholds = sorted(set(r.thresh for r in roots if r.feat == Xf))
+        # print(f"{indent}📊 Umbrales usados: {thresholds}")
         If = np.array([[-np.inf] + thresholds + [np.inf]]).T
         If = np.hstack([If[:-1], If[1:]])
 
-        # Dividir los árboles en esos intervalos
         branches = [self.computeBranch(r, If, Xf, verbose=False) for r in roots]
 
-        # Fusionar recursivamente
         children = []
         for j in range(len(If)):
             child_roots = [b[j] for b in branches if b[j] is not None]
+            # print(f"{indent}  └─ Intervalo {j}: {If[j]} → {len(child_roots)} nodos")
+
             if child_roots:
-                child = self.mergeDecisionTrees(child_roots, num_classes, level + 1)
+                child = self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names)
             else:
-                # 🔄 Si no hay subárboles válidos para este intervalo, usar predicción por mayoría
                 labels = np.zeros(num_classes)
                 for r in roots:
                     if r.is_leaf and r.labels is not None:
                         labels += r.labels
                     elif r.labels is not None:
                         labels[np.argmax(r.labels)] += 1
+                # print(f"{indent}    🪹 Sin nodos → hoja por mayoría: {labels}")
                 child = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
+
             children.append(child)
 
-        # Crear SuperNode final
+        # print(f"{indent}✅ SuperNode creado en nivel {level} con feature {fname} y {len(children)} hijos")
         super_node = self.SuperNode(feat_num=Xf, intervals=If[:, 1], children=children, level=level)
         if level == 0:
             self.root = super_node
         return super_node
+
+
 
     class SuperNode:
         def __init__(self, feat_num=None, intervals=None, weights=None, labels=None, children=None, is_leaf=False, level=0):
@@ -849,9 +856,9 @@ No. Tenemos nodos internos, así que no fusionamos directamente en una hoja.
 
 PASO 3: ¿Cuál es la variable (X_i) más usada?
 
-Árbol 1 → `X_1`
-Árbol 2 → `X_1`
-Árbol 3 → `X_3`
+Árbol 1 → X_1
+Árbol 2 → X_1
+Árbol 3 → X_3
 
 X_1 es la más usada (2 veces).
 
