@@ -797,6 +797,35 @@ class SuperTree(Surrogate):
                             return predict_datum(node.children[i], x)
                     return np.argmax(node.labels)
             return np.array([predict_datum(self, el) for el in X])
+        
+        def to_dict(self):
+            node_dict = {
+                "is_leaf": self.is_leaf,
+                "feat": int(self.feat) if self.feat is not None else None,
+                "labels": [int(x) for x in self.labels.tolist()] if isinstance(self.labels, np.ndarray) else self.labels,
+                "intervals": self.intervals if hasattr(self, "intervals") else [],
+            }
+
+            if self.is_leaf:
+                node_dict["children"] = []
+            else:
+                node_dict["children"] = [child.to_dict() for child in self.children]
+
+            return node_dict
+
+        
+        @classmethod
+        def from_dict(cls, data):
+            return cls(
+                feat_num=data.get("feat"),
+                intervals=data.get("intervals", []),
+                labels=np.array(data.get("labels", [])),
+                children=[cls.from_dict(child) for child in data.get("children", [])],
+                is_leaf=data.get("is_leaf", False),
+                level=data.get("level", 0)
+            )
+
+
 
     def computeBranch(self, node, intervals, feature_idx, verbose=False):
         if node is None:
