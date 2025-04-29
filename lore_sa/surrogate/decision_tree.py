@@ -435,7 +435,7 @@ class EnsembleDecisionTreeSurrogate(Surrogate):
         supertree = SuperTree()
         roots = [supertree.rec_buildTree(tree, list(range(tree.n_features_in_))) for tree in self.trees]
         supertree.mergeDecisionTrees(roots, num_classes=self.trees[0].n_classes_)
-        print("✅ merge_trees() fue llamado")
+        # print("✅ merge_trees() fue llamado")
         supertree.prune_redundant_leaves_full()  # ✅ método mejorado
         supertree.merge_equal_class_leaves()  # 👈 Añade esta línea
         return supertree
@@ -453,7 +453,7 @@ class SuperTree(Surrogate):
         return self.root
     
     def prune_redundant_leaves_full(self): # eliminar nodos redundantes (cuando todos los hijos de un nodo predicen lo mismo)
-        print("🔧 Iniciando poda completa de SuperTree")
+        # print("🔧 Iniciando poda completa de SuperTree")
 
         def prune(node):
             if node.is_leaf or not node.children:
