@@ -133,7 +133,7 @@ class TabularGeneticGeneratorLore(Lore):
     def __init__(self, bbox: AbstractBBox, dataset: TabularDataset):
         encoder = ColumnTransformerEnc(dataset.descriptor)
         generator = GeneticGenerator(bbox, dataset, encoder, 0.1)
-        surrogate = EnsembleDecisionTreeSurrogate(n_estimators=5)
+        surrogate = EnsembleDecisionTreeSurrogate(n_estimators=1)
         super().__init__(bbox, dataset, encoder, generator, surrogate)
 
     def explain_instance(self, x: np.array, merge=False):

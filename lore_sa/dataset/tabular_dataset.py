@@ -179,3 +179,9 @@ class TabularDataset(Dataset):
             for name in self.descriptor[category].keys():
                 if self.descriptor[category][name]['index'] == index:
                     return name
+                
+    def get_descriptor(self):
+        return self.descriptor
+
+    def set_descriptor(self, descriptor):
+        self.descriptor = descriptor
