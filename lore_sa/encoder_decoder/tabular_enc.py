@@ -240,5 +240,11 @@ class ColumnTransformerEnc(EncDec):
         :param X:
         :return:
         """
+        # print("Encoder categories:", self.target_encoder.categories_)
+        # print("Input sample:", X[:5])
+
+        if X.dtype.kind in {'i', 'u'}:  # Si son enteros
+            categories = self.target_encoder.categories_[0]
+            X = np.array([[categories[i]] for i in X.ravel()])
         return self.target_encoder.transform(X)
 

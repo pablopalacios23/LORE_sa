@@ -605,6 +605,26 @@ class SuperTree(Surrogate):
 
         crules, deltas = zip(*best)
         return list(crules), list(deltas)
+    
+    def __str__(self):
+        return self._to_str(self.root)
+
+    def _to_str(self, node, depth=0):
+        indent = "  " * depth
+        if node.is_leaf:
+            return f"{indent}Leaf → pred: {node.labels}\n"
+
+        result = f"{indent}Feature[{node.feat}] split:\n"
+        for i, child in enumerate(node.children):
+            if i == 0:
+                cond = f"<= {node.intervals[i]:.2f}"
+            elif i == len(node.children) - 1:
+                cond = f"> {node.intervals[i - 1]:.2f}"
+            else:
+                cond = f"({node.intervals[i-1]:.2f}, {node.intervals[i]:.2f}]"
+            result += f"{indent}  ├─ If {cond}:\n"
+            result += self._to_str(child, depth + 2)
+        return result
 
     class Node:
         def __init__(self, feat_num=None, weights=None, thresh=None, labels=None, is_leaf=False, impurity=1, **kwargs):
