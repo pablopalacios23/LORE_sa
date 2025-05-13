@@ -452,6 +452,84 @@ class SuperTree(Surrogate):
     def merge_trees(self):
         return self.root
     
+    
+    @staticmethod
+    def clean_degenerate_intervals(node, eps=1e-6):
+        if not node or node.is_leaf or not node.children or not node.intervals:
+            return
+
+        new_intervals = []
+        new_children = []
+
+        prev = None
+        for i, curr in enumerate(node.intervals):
+            # 1️⃣ Si es inválido
+            if curr is None or curr == float("inf"):
+                # print(f"[🧹] Eliminando intervalo inválido: {curr}")
+                continue
+
+            # 2️⃣ Si es degenerado
+            if prev is not None and round(prev, 2) == round(curr, 2):
+                # print(f"[🧹] Eliminando intervalo degenerado: ({prev}, {curr}]")
+                continue
+
+            # ✅ Intervalo válido
+            new_intervals.append(curr)
+            new_children.append(node.children[i])
+            prev = curr
+
+        # 3️⃣ Añadir último hijo si queda y si no fue por un inf
+        if len(new_children) < len(node.children):
+            last = node.children[-1]
+            if last and (not new_intervals or new_intervals[-1] != float("inf")):
+                new_children.append(last)
+
+        # 🧠 Asignar solo si hay coherencia
+        if len(new_children) == len(new_intervals) + 1:
+            node.intervals = new_intervals
+            node.children = new_children
+        else:
+            print(f"[⚠️] Inconsistencia: {len(new_intervals)} intervals vs {len(new_children)} children. No se actualiza.")
+
+        # 🔁 Recursivamente en hijos válidos
+        for child in node.children:
+            SuperTree.clean_degenerate_intervals(child, eps)
+
+
+
+    @staticmethod
+    def clean_intervals_in_dict(node_dict, eps=1e-6):
+        if node_dict.get("is_leaf", False):
+            return
+
+        clean_intervals = []
+        clean_children = []
+
+        intervals = node_dict.get("intervals", [])
+        children = node_dict.get("children", [])
+
+        for i, interval in enumerate(intervals):
+            if isinstance(interval, list) and len(interval) == 2:
+                a, b = interval
+                if not np.isinf(a) and not np.isinf(b) and abs(b - a) > eps:
+                    clean_intervals.append(interval)
+                    clean_children.append(children[i])
+            else:
+                clean_intervals.append(interval)
+                clean_children.append(children[i])
+
+        if len(clean_children) < len(children):
+            clean_children.append(children[-1])
+
+        node_dict["intervals"] = np.array(clean_intervals)  # ✅ Evita el error en to_dict
+        node_dict["children"] = clean_children
+
+        for child in node_dict["children"]:
+            SuperTree.clean_intervals_in_dict(child, eps)
+
+
+
+            
     def prune_redundant_leaves_full(self): # eliminar nodos redundantes (cuando todos los hijos de un nodo predicen lo mismo)
         # print("🔧 Iniciando poda completa de SuperTree")
 
@@ -609,12 +687,16 @@ class SuperTree(Surrogate):
     def __str__(self):
         return self._to_str(self.root)
 
-    def _to_str(self, node, depth=0):
+    def _to_str(self, node, depth=0, feature_names=None):
         indent = "  " * depth
         if node.is_leaf:
             return f"{indent}Leaf → pred: {node.labels}\n"
 
-        result = f"{indent}Feature[{node.feat}] split:\n"
+        feat_name = f"Feature[{node.feat}]"
+        if feature_names and node.feat is not None:
+            feat_name = feature_names[node.feat]
+
+        result = f"{indent}{feat_name} split:\n"
         for i, child in enumerate(node.children):
             if i == 0:
                 cond = f"<= {node.intervals[i]:.2f}"
@@ -623,7 +705,7 @@ class SuperTree(Surrogate):
             else:
                 cond = f"({node.intervals[i-1]:.2f}, {node.intervals[i]:.2f}]"
             result += f"{indent}  ├─ If {cond}:\n"
-            result += self._to_str(child, depth + 2)
+            result += self._to_str(child, depth + 2, feature_names)
         return result
 
     class Node:
@@ -677,28 +759,47 @@ class SuperTree(Surrogate):
                 node_dict["right"] = self._right_child.to_dict() if self._right_child else None
             elif self.children:
                 node_dict["children"] = [child.to_dict() for child in self.children]
-                node_dict["intervals"] = self.intervals.tolist()
+                node_dict["intervals"] = self.intervals.tolist() if isinstance(self.intervals, np.ndarray) else self.intervals
             return node_dict
         
+
         @staticmethod
-        def from_dict(d):
+        def from_dict(d, eps=1e-6):
             node = SuperTree.Node(
                 feat_num=d.get("feat"),
                 thresh=d.get("thresh"),
                 labels=np.array(d.get("labels")) if d.get("labels") else None,
                 is_leaf=d.get("is_leaf", False)
             )
+
             if "left" in d or "right" in d:
-                node._left_child = SuperTree.Node.from_dict(d.get("left")) if d.get("left") else None
-                node._right_child = SuperTree.Node.from_dict(d.get("right")) if d.get("right") else None
+                node._left_child = SuperTree.Node.from_dict(d.get("left"), eps) if d.get("left") else None
+                node._right_child = SuperTree.Node.from_dict(d.get("right"), eps) if d.get("right") else None
                 node.children = []
                 if node._left_child:
                     node.children.append(node._left_child)
                 if node._right_child:
                     node.children.append(node._right_child)
+
             elif "children" in d:
-                node.children = [SuperTree.Node.from_dict(c) for c in d.get("children")]
-                node.intervals = d.get("intervals", [])
+                raw_intervals = d.get("intervals", [])
+                raw_children = d.get("children", [])
+
+                cleaned_intervals = []
+                cleaned_children_dicts = []
+                prev = -float("inf")
+                for i, val in enumerate(raw_intervals):
+                    if abs(val - prev) > eps:
+                        cleaned_intervals.append(val)
+                        cleaned_children_dicts.append(raw_children[i])
+                        prev = val
+                # Añadir último hijo si falta
+                if len(cleaned_children_dicts) < len(raw_children):
+                    cleaned_children_dicts.append(raw_children[-1])
+
+                node.intervals = cleaned_intervals
+                node.children = [SuperTree.Node.from_dict(c, eps) for c in cleaned_children_dicts]
+
             return node
 
     def rec_buildTree(self, dt: DecisionTreeClassifier, feature_used): # Recorre internamente el árbol de decisión y lo convierte en un árbol de decisión personalizado. Así podemos manipular los árboles fácilmente después (porque no dependes de la estructura rígida de sklearn)
@@ -715,10 +816,11 @@ class SuperTree(Surrogate):
 
         return createNode(0)
 
-    def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None):
+    def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None, client_ids=None):
         indent = "  " * level
-        roots = [r for r in roots if r is not None]
+        EPSILON = 1e-6
 
+        roots = [r for r in roots if r is not None]
         if not roots:
             return None
 
@@ -755,8 +857,14 @@ class SuperTree(Surrogate):
                 elif hasattr(r, "intervals"):
                     thresholds.extend([t for t in r.intervals if np.isfinite(t)])
 
-        thresholds = sorted(set(thresholds))
-        
+        # Eliminar umbrales redundantes
+        thresholds = sorted(thresholds)
+        cleaned = []
+        for t in thresholds:
+            if not cleaned or abs(t - cleaned[-1]) > EPSILON:
+                cleaned.append(t)
+        thresholds = cleaned
+
         if not thresholds:
             labels = np.zeros(num_classes)
             for r in roots:
@@ -772,16 +880,27 @@ class SuperTree(Surrogate):
             thresholds = [t - 1e-5, t]
 
         bounds = [-float("inf")] + thresholds + [float("inf")]
-        If = np.array(list(zip(bounds[:-1], bounds[1:])))
+        If_raw = list(zip(bounds[:-1], bounds[1:]))
+        If = np.array([interval for interval in If_raw if interval[1] - interval[0] > EPSILON])
 
-        branches = [self.computeBranch(r, If, Xf, verbose=False) for r in roots]
+        if len(If) == 0:
+            labels = np.zeros(num_classes)
+            for r in roots:
+                if r.labels is not None:
+                    labels += r.labels
+            return self.SuperNode(is_leaf=True, labels=labels, level=level)
+
+        branches = [self.computeBranch(r, If, Xf) for r in roots]
 
         children = []
         for j in range(len(If)):
             child_roots = [b[j] for b in branches if b[j] is not None]
             if child_roots:
-                child = self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names)
+                child = self.mergeDecisionTrees(
+                    child_roots, num_classes, level + 1, feature_names, client_ids=client_ids
+                )
             else:
+                print(f"{indent}⚠️ Intervalo {If[j]} vacío → creando hoja majority")
                 labels = np.zeros(num_classes)
                 for r in roots:
                     if r.is_leaf and r.labels is not None:
@@ -795,6 +914,7 @@ class SuperTree(Surrogate):
         if level == 0:
             self.root = super_node
         return super_node
+
 
 
     class SuperNode:
@@ -845,12 +965,30 @@ class SuperTree(Surrogate):
 
         
         @classmethod
-        def from_dict(cls, data):
+        def from_dict(cls, data, eps=1e-6):
+            intervals = data.get("intervals", [])
+            children_data = data.get("children", [])
+
+            # Filtrar intervalos degenerados
+            cleaned_intervals = []
+            cleaned_children = []
+            prev = -float("inf")
+            for i, val in enumerate(intervals):
+                if abs(val - prev) > eps:
+                    cleaned_intervals.append(val)
+                    cleaned_children.append(children_data[i])
+                    prev = val
+            # Añadir último hijo si falta
+            if len(cleaned_children) < len(children_data):
+                cleaned_children.append(children_data[-1])
+
+            children = [cls.from_dict(child, eps) for child in cleaned_children]
+
             return cls(
                 feat_num=data.get("feat"),
-                intervals=data.get("intervals", []),
+                intervals=cleaned_intervals,
                 labels=np.array(data.get("labels", [])),
-                children=[cls.from_dict(child) for child in data.get("children", [])],
+                children=children,
                 is_leaf=data.get("is_leaf", False),
                 level=data.get("level", 0)
             )
@@ -858,15 +996,20 @@ class SuperTree(Surrogate):
 
 
     def computeBranch(self, node, intervals, feature_idx, verbose=False):
+        EPSILON = 1e-8  # Umbral mínimo para considerar un intervalo válido
+
         if node is None:
             return [None] * len(intervals)
 
-        # ✅ Manejamos SuperNode (no tiene .thresh, tiene .intervals y .children)
+        # ✅ Manejamos SuperNode (intervalos múltiples)
         if hasattr(node, "intervals") and hasattr(node, "children"):
             if node.feat != feature_idx:
                 return [node for _ in intervals]
             result = []
             for a, b in intervals:
+                if b - a < EPSILON:
+                    result.append(None)
+                    continue
                 matched_child = None
                 for i, thr in enumerate(node.intervals):
                     left = node.intervals[i - 1] if i > 0 else -float("inf")
@@ -875,25 +1018,23 @@ class SuperTree(Surrogate):
                         matched_child = node.children[i]
                         break
                 if matched_child is None:
-                    # si no encaja en ningún hijo, devolvemos hoja con etiquetas actuales
                     matched_child = self.SuperNode(is_leaf=True, labels=node.labels, level=getattr(node, "level", 0) + 1)
                 result.append(matched_child)
             return result
 
-        # ✅ Caso normal (árbol binario con .thresh)
+        # ✅ Caso hoja
         if node.is_leaf:
-            return [self.Node(labels=node.labels, is_leaf=True) for _ in intervals]
+            return [self.Node(labels=node.labels, is_leaf=True) if (b - a >= EPSILON) else None for a, b in intervals]
 
+        # ✅ Caso binario
         if node.feat != feature_idx:
-            left = self.computeBranch(node._left_child, intervals, feature_idx, verbose)
-            right = self.computeBranch(node._right_child, intervals, feature_idx, verbose)
-            return [
-                self.Node(feat_num=node.feat, thresh=node.thresh, left_child=l, right_child=r)
-                for l, r in zip(left, right)
-            ]
+            return [node if (b - a >= EPSILON) else None for a, b in intervals]
 
         splits = []
         for a, b in intervals:
+            if b - a < EPSILON:
+                splits.append(None)
+                continue
             if node.thresh <= a:
                 splits.append(self.computeBranch(node._right_child, [(a, b)], feature_idx, verbose)[0])
             elif node.thresh >= b:
@@ -905,6 +1046,7 @@ class SuperTree(Surrogate):
                     self.Node(feat_num=feature_idx, thresh=node.thresh, left_child=left, right_child=right)
                 )
         return splits
+
         
 '''
 
