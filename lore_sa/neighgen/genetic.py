@@ -326,7 +326,7 @@ class GeneticGenerator(LegacyGeneticGenerator):
     Random Generator creates neighbor instances by generating random values starting from an input instance and
     pruning the generation around a fitness function based on proximity to the instance to explain
     """
-    def __init__(self, bbox=None, dataset=None, encoder=None, ocr=0.1,
+    def __init__(self, bbox=None, dataset=None, encoder=None, ocr=0.5,
                  alpha1=0.5, alpha2=0.5, metric=neuclidean, ngen=100, mutpb=0.2, cxpb=0.5,
                  tournsize=3, halloffame_ratio=0.1, random_seed=None):
         """
@@ -375,31 +375,47 @@ class GeneticGenerator(LegacyGeneticGenerator):
         """
         new_x = z.copy()
 
-        # determine the number of instances to generate for the same class and for a different class
         num_samples_eq = int(np.round(num_instances * 0.5))
         num_samples_neq = num_instances - num_samples_eq
 
-        # generate the instances for the same class
-        toolbox_eq = self.setup_toolbox(z, self.population_fitness_equal(z), num_samples_eq) # Se crea la población inicial para vecinos con misma clase (Z_eq) y se inicializa i implícitamente dentro de fit.
+        # Generar Z_eq (misma clase)
+        toolbox_eq = self.setup_toolbox(z, self.population_fitness_equal(z), num_samples_eq)
         population_eq, halloffame_eq, logbook_eq = self.fit(toolbox_eq, num_samples_eq)
         Z_eq = self.add_halloffame(population_eq, halloffame_eq)
-        # print(logbook_eq)
 
-        # generate the instances for a different class
+        # Generar Z_neq (clases distintas)
         toolbox_noteq = self.setup_toolbox(z, self.population_fitness_notequal(z), num_samples_neq)
         population_noteq, halloffame_noteq, logbook_noteq = self.fit(toolbox_noteq, num_samples_neq)
         Z_noteq = self.add_halloffame(population_noteq, halloffame_noteq)
-        # print(logbook_noteq)
 
-        # concatenate the two sets of instances
+        # 🔧 EXTRA: Asegurar que aparezcan TODAS las clases distintas
+        x_decoded = self.encoder.decode(z.reshape(1, -1))
+        current_class = self.bbox.predict(x_decoded)[0]
+
+        all_classes = np.unique(self.bbox.predict(self.encoder.decode(self.dataset.df.drop("target", axis=1).values)))
+        target_classes = [c for c in all_classes if c != current_class]
+
+        Z_noteq_decoded = self.encoder.decode(Z_noteq)
+        classes_in_Z_neq = np.unique(self.bbox.predict(Z_noteq_decoded))
+
+        missing_classes = [c for c in target_classes if c not in classes_in_Z_neq]
+
+        for missing_class in missing_classes:
+            def force_fitness(z_inner, z1):
+                x1 = self.encoder.decode(z1.reshape(1, -1))
+                y1 = self.bbox.predict(x1)[0]
+                return (1.0 if y1 == missing_class else 0.0,)
+
+            toolbox_forced = self.setup_toolbox(z, force_fitness, 1)
+            pop_f, hof_f, _ = self.fit(toolbox_forced, 1)
+            forced_instance = self.add_halloffame(pop_f, hof_f)
+            Z_noteq = np.concatenate([Z_noteq, forced_instance], axis=0)
+
+        # Fusionar Z_eq + Z_neq y balancear
         Z = np.concatenate((Z_eq, Z_noteq), axis=0)
-
-        # balance the instances according to the minority class
         Z = super(GeneticGenerator, self).balance_neigh(z, Z, num_instances)
-        # the first element is the input instance
-
         Z[0] = new_x
-        return Z  # Z es la combinación de Z_eq y Z_noteq, balanceada.
+        return Z
 
     # def add_halloffame(self, population, halloffame):
     #     fitness_values = [p.fitness.wvalues[0] for p in population]

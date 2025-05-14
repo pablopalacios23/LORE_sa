@@ -433,8 +433,9 @@ class EnsembleDecisionTreeSurrogate(Surrogate):
 
     def merge_trees(self):
         supertree = SuperTree()
-        roots = [supertree.rec_buildTree(tree, list(range(tree.n_features_in_))) for tree in self.trees]
-        supertree.mergeDecisionTrees(roots, num_classes=self.trees[0].n_classes_)
+        num_classes = len(np.unique(self.Y))  # <- Asegúrate de tener acceso a Y (etiquetas)
+        roots = [supertree.rec_buildTree(tree, list(range(tree.n_features_in_)), num_classes) for tree in self.trees]
+        supertree.mergeDecisionTrees(roots, num_classes=num_classes)
         # print("✅ merge_trees() fue llamado")
         supertree.prune_redundant_leaves_full()  # ✅ método mejorado
         supertree.merge_equal_class_leaves()  # 👈 Añade esta línea
@@ -764,17 +765,29 @@ class SuperTree(Surrogate):
                 node.intervals = d.get("intervals", [])
             return node
 
-    def rec_buildTree(self, dt: DecisionTreeClassifier, feature_used): # Recorre internamente el árbol de decisión y lo convierte en un árbol de decisión personalizado. Así podemos manipular los árboles fácilmente después (porque no dependes de la estructura rígida de sklearn)
+    def rec_buildTree(self, dt: DecisionTreeClassifier, feature_used, num_classes):
         nodes = dt.tree_.__getstate__()['nodes']
         values = dt.tree_.__getstate__()['values']
 
         def createNode(idx):
             line = nodes[idx]
-            if line[0] == -1:
-                return self.Node(feat_num=None, thresh=None, labels=values[idx][0], is_leaf=True)
+            raw_pred = values[idx][0]
+            full_pred = np.zeros(num_classes)
+            copy_len = min(len(raw_pred), num_classes)
+            full_pred[:copy_len] = raw_pred[:copy_len]
+
+            if line[0] == -1:  # hoja
+                return self.Node(feat_num=None, thresh=None, labels=full_pred, is_leaf=True)
             LC = createNode(line[0])
             RC = createNode(line[1])
-            return self.Node(feat_num=feature_used[line[2]], thresh=line[3], labels=values[idx], is_leaf=False, left_child=LC, right_child=RC)
+            return self.Node(
+                feat_num=feature_used[line[2]],
+                thresh=line[3],
+                labels=full_pred,
+                is_leaf=False,
+                left_child=LC,
+                right_child=RC
+            )
 
         return createNode(0)
 
