@@ -247,4 +247,7 @@ class ColumnTransformerEnc(EncDec):
             categories = self.target_encoder.categories_[0]
             X = np.array([[categories[i]] for i in X.ravel()])
         return self.target_encoder.transform(X)
+    
+    def set_classes(self, class_list):
+        self.target_encoder.categories_ = [np.array(class_list)]
 

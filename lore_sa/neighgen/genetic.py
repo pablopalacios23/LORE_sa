@@ -401,8 +401,8 @@ class GeneticGenerator(LegacyGeneticGenerator):
         missing_classes = [c for c in target_classes if c not in classes_in_Z_neq]
 
         for missing_class in missing_classes:
-            def force_fitness(z_inner, z1):
-                x1 = self.encoder.decode(z1.reshape(1, -1))
+            def force_fitness(z1):
+                x1 = self.encoder.decode(np.array(z1).reshape(1, -1))
                 y1 = self.bbox.predict(x1)[0]
                 return (1.0 if y1 == missing_class else 0.0,)
 

@@ -453,6 +453,19 @@ class SuperTree(Surrogate):
     def merge_trees(self):
         return self.root
     
+    @staticmethod
+    def find_leaf(node, z):
+        while not node.is_leaf:
+            val = z[node.feat]
+            for i, threshold in enumerate(node.intervals):
+                if val <= threshold:
+                    node = node.children[i]
+                    break
+            else:
+                node = node.children[-1]
+        return node
+
+        
     @classmethod
     def convert_SuperNode_to_Node(cls, super_node):
         if super_node is None:
@@ -635,6 +648,9 @@ class SuperTree(Surrogate):
         prem, cons = traverse(self.root, z)
         compacted = DecisionTreeSurrogate().compact_premises(prem)
         return Rule(premises=compacted, consequences=cons, encoder=encoder)
+
+
+
 
     def get_counterfactual_rules(self, z, neighborhood_train_X, neighborhood_train_Y, encoder, **kwargs):
         dt_dummy = DecisionTreeSurrogate()
