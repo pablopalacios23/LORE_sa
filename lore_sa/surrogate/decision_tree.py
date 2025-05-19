@@ -648,6 +648,7 @@ class SuperTree(Surrogate):
         prem, cons = traverse(self.root, z)
         compacted = DecisionTreeSurrogate().compact_premises(prem)
         return Rule(premises=compacted, consequences=cons, encoder=encoder)
+    
 
 
 
@@ -680,6 +681,41 @@ class SuperTree(Surrogate):
         best = [(r, d) for r, d in filtered_rules if len(d) == min_len]
 
         crules, deltas = zip(*best)
+        return list(crules), list(deltas)
+    
+
+    def get_counterfactual_rules_merged(self, z, encoder, **kwargs):
+        from lore_sa.util import vector2dict
+        from lore_sa.surrogate.decision_tree import DecisionTreeSurrogate
+
+        dt_dummy = DecisionTreeSurrogate()
+        dt_dummy.compact_premises = DecisionTreeSurrogate().compact_premises
+
+        z_dict = vector2dict(z, list(encoder.encoded_features.values()))
+        pred_class = self.root.predict([z])[0]
+
+        # Recorremos todas las reglas del árbol
+        all_rules = self.root.get_all_rules(encoder)
+
+        rules_by_class = {}
+        for rule in all_rules:
+            target_class = rule.consequences.value
+
+            # Solo nos interesan clases distintas a la actual
+            if target_class == pred_class:
+                continue
+
+            # Calculamos condiciones que z no cumple (para saber qué cambiar)
+            delta = dt_dummy.get_falsified_conditions(z_dict, rule)
+
+            # Nos quedamos con la de menor cambio por clase
+            if target_class not in rules_by_class or len(delta) < len(rules_by_class[target_class][1]):
+                rules_by_class[target_class] = (rule, delta)
+
+        if not rules_by_class:
+            return [], []
+
+        crules, deltas = zip(*rules_by_class.values())
         return list(crules), list(deltas)
     
     def __str__(self):
@@ -924,6 +960,49 @@ class SuperTree(Surrogate):
                 node_dict["children"] = [child.to_dict() for child in self.children]
 
             return node_dict
+        
+        def get_all_rules(self, encoder, feature_path=None):
+            if feature_path is None:
+                feature_path = []
+
+            from lore_sa.rule import Expression, Rule
+            from lore_sa.surrogate.decision_tree import DecisionTreeSurrogate
+            import operator
+
+            rules = []
+            feature_names = list(encoder.encoded_features.values())
+            numeric_columns = list(encoder.encoded_descriptor["numeric"].keys())
+            target_feature_name = list(encoder.encoded_descriptor["target"].keys())[0]
+
+            def traverse(node, path):
+                if node.is_leaf:
+                    pred_class = np.argmax(node.labels)
+                    consequence = Expression(
+                        variable=target_feature_name,
+                        operator=operator.eq,
+                        value=encoder.decode_target_class([[pred_class]])[0][0]
+                    )
+                    compacted = DecisionTreeSurrogate().compact_premises(path)
+                    rules.append(Rule(premises=compacted, consequences=consequence, encoder=encoder))
+                    return
+
+                for i, child in enumerate(node.children):
+                    local_path = path.copy()
+                    feat_name = feature_names[node.feat]
+
+                    if feat_name in numeric_columns:
+                        if i == 0:
+                            local_path.append(Expression(feat_name, operator.le, node.intervals[i]))
+                        elif i == len(node.children) - 1:
+                            local_path.append(Expression(feat_name, operator.gt, node.intervals[i - 1]))
+                        else:
+                            local_path.append(Expression(feat_name, operator.gt, node.intervals[i - 1]))
+                            local_path.append(Expression(feat_name, operator.le, node.intervals[i]))
+
+                    traverse(child, local_path)
+
+            traverse(self, feature_path)
+            return rules
 
         
         @classmethod

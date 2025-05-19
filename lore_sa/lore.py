@@ -113,6 +113,8 @@ class Lore(object):
             'rule': rule.to_dict(),
             'counterfactuals': [c.to_dict() for c in crules],
             'merged_tree': merged_tree,
+            'neighborhood_Z': neighbour,
+            'neighborhood_Yb': neighb_train_yb,
         }
 
 
