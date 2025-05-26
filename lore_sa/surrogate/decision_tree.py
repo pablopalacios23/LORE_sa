@@ -624,31 +624,41 @@ class SuperTree(Surrogate):
                     value=encoder.decode_target_class([[predicted_class]])[0][0]
                 )
                 return premises, consequence
-            else:
-                val = x[node.feat]
-                for i, thr in enumerate(node.intervals):
-                    if val <= thr:
-                        if feature_names[node.feat] in numeric_columns:
-                            if i == 0:
-                                premises.append(Expression(feature_names[node.feat], operator.le, thr))
-                            else:
-                                premises.append(Expression(feature_names[node.feat], operator.gt, node.intervals[i - 1]))
-                        else:
-                            premises.append(Expression(feature_names[node.feat], operator.eq, val))
-                        return traverse(node.children[i], x)
 
-                # Último intervalo: > último umbral
-                last_thr = node.intervals[-1]
-                if feature_names[node.feat] in numeric_columns:
-                    premises.append(Expression(feature_names[node.feat], operator.gt, last_thr))
-                else:
-                    premises.append(Expression(feature_names[node.feat], operator.eq, val))
-                return traverse(node.children[-1], x)
+            val = x[node.feat]
+            feat_name = feature_names[node.feat]
+            is_numeric = feat_name in numeric_columns
+            is_categorical = "=" in feat_name
+            base_feat = feat_name.split("=")[0] if is_categorical else feat_name
+            cat_value = feat_name.split("=")[1] if is_categorical else None
+
+            for i, thr in enumerate(node.intervals):
+                if val <= thr:
+                    if is_numeric:
+                        if i == 0:
+                            premises.append(Expression(base_feat, operator.le, thr))
+                        else:
+                            premises.append(Expression(base_feat, operator.gt, node.intervals[i - 1]))
+                    elif is_categorical:
+                        premises.append(Expression(base_feat, operator.ne, cat_value))
+                    else:
+                        premises.append(Expression(base_feat, operator.eq, val))
+                    return traverse(node.children[i], x)
+
+            # Último intervalo
+            last_thr = node.intervals[-1]
+            if is_numeric:
+                premises.append(Expression(base_feat, operator.gt, last_thr))
+            elif is_categorical:
+                premises.append(Expression(base_feat, operator.eq, cat_value))
+            else:
+                premises.append(Expression(base_feat, operator.eq, val))
+
+            return traverse(node.children[-1], x)
 
         prem, cons = traverse(self.root, z)
         compacted = DecisionTreeSurrogate().compact_premises(prem)
         return Rule(premises=compacted, consequences=cons, encoder=encoder)
-    
 
 
 
@@ -682,6 +692,7 @@ class SuperTree(Surrogate):
 
         crules, deltas = zip(*best)
         return list(crules), list(deltas)
+    
     
 
     def get_counterfactual_rules_merged(self, z, encoder, **kwargs):
