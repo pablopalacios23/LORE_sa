@@ -78,7 +78,8 @@ class Lore(object):
         self.class_name = dataset.class_name
 
 
-    def explain(self, x: np.array, num_instances=1000, merge=False):
+    def explain(self, x: np.array, num_instances=100, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None):
+
         """
         Explains a single instance of the dataset.
         :param x: an array with the values of the instance to explain (the target class is not included)
@@ -88,6 +89,7 @@ class Lore(object):
         [z] = self.encoder.encode([x])
 
         neighbour = self.generator.generate(z, num_instances, self.descriptor, self.encoder)
+
         dec_neighbor = self.encoder.decode(neighbour)
 
         neighb_train_X = dec_neighbor[:, :]
@@ -105,13 +107,18 @@ class Lore(object):
             }
 
         # 👉 Si se hace merge (solo en servidor)
-        merged_tree = self.surrogate.merge_trees()
-        rule = merged_tree.get_rule(z, self.encoder)
-        crules, deltas = merged_tree.get_counterfactual_rules(z, neighbour, neighb_train_yb, self.encoder)
+        merged_tree = self.surrogate.get_single_supertree(
+            num_classes=num_classes,
+            feature_names=feature_names,
+            categorical_features=categorical_features,
+            global_mapping=global_mapping
+        )
+        # rule = merged_tree.get_rule(z, self.encoder)
+        # crules, deltas = merged_tree.get_counterfactual_rules(z, neighbour, neighb_train_yb, self.encoder)
 
         return {
-            'rule': rule.to_dict(),
-            'counterfactuals': [c.to_dict() for c in crules],
+            # 'rule': rule.to_dict(),
+            # 'counterfactuals': [c.to_dict() for c in crules],
             'merged_tree': merged_tree,
             'neighborhood_Z': neighbour,
             'neighborhood_Yb': neighb_train_yb,
@@ -138,5 +145,5 @@ class TabularGeneticGeneratorLore(Lore):
         surrogate = EnsembleDecisionTreeSurrogate(n_estimators=1)
         super().__init__(bbox, dataset, encoder, generator, surrogate)
 
-    def explain_instance(self, x: np.array, merge=False):
-        return self.explain(x.values, merge=merge)
+    def explain_instance(self, x: np.array, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None):
+        return self.explain(x.values, merge=merge, num_classes=num_classes, feature_names=feature_names, categorical_features=categorical_features, global_mapping=global_mapping)
