@@ -659,6 +659,8 @@ class SuperTree(Surrogate):
         prem, cons = traverse(self.root, z)
         compacted = DecisionTreeSurrogate().compact_premises(prem)
         return Rule(premises=compacted, consequences=cons, encoder=encoder)
+        
+    
 
 
 
@@ -892,10 +894,13 @@ class SuperTree(Surrogate):
         fname = feature_names[Xf] if feature_names else f"X_{Xf}"
         # print(f"{indent}📌 Variable más usada: {fname}")
 
-        thresholds = sorted(set(r.thresh for r in roots if r.feat == Xf and r.thresh is not None))
-        # print(f"{indent}📊 Umbrales usados: {thresholds}")
-        If = np.array([[-np.inf] + thresholds + [np.inf]]).T
-        If = np.hstack([If[:-1], If[1:]])
+        thresholds = [r.thresh for r in roots if r.feat == Xf and r.thresh is not None]
+        if thresholds:
+            best_thresh = max(set(thresholds), key=thresholds.count)
+        else:
+            best_thresh = 0  # fallback (no debería pasar normalmente)
+
+        If = np.array([[-np.inf, best_thresh], [best_thresh, np.inf]])
 
         branches = [self.computeBranch(r, If, Xf, verbose=False) for r in roots]
 
