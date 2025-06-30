@@ -116,6 +116,7 @@ class ColumnTransformerEnc(EncDec):
         self.target_encoder = OrdinalEncoder(dtype=np.int16)
 
         self.encoder.fit(mock_data)
+        
         self.target_encoder.fit(np.array(target_column).reshape(-1, 1))
 
         # print('transformers', self.encoder.transformers_)

@@ -392,7 +392,14 @@ class GeneticGenerator(LegacyGeneticGenerator):
         x_decoded = self.encoder.decode(z.reshape(1, -1))
         current_class = self.bbox.predict(x_decoded)[0]
 
-        all_classes = np.unique(self.bbox.predict(self.encoder.decode(self.dataset.df.drop("target", axis=1).values)))
+        class_col = self.dataset.class_name
+        X = self.dataset.df.drop(columns=[class_col]) if class_col in self.dataset.df.columns else self.dataset.df
+
+        # Codificamos antes de decodificar para evitar errores con strings
+        X_encoded = self.encoder.encode(X.values)
+        decoded_X = self.encoder.decode(X_encoded)
+
+        all_classes = np.unique(self.bbox.predict(decoded_X))
         target_classes = [c for c in all_classes if c != current_class]
 
         Z_noteq_decoded = self.encoder.decode(Z_noteq)

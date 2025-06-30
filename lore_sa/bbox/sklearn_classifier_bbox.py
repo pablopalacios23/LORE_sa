@@ -1,6 +1,7 @@
 from lore_sa.bbox.bbox import AbstractBBox
 
-__all__ = ["AbstractBBox","sklearnBBox"]
+
+__all__ = ["AbstractBBox","sklearnBBox",]
 class sklearnBBox(AbstractBBox):
     def __init__(self, classifier):
         self.bbox = classifier
@@ -10,3 +11,4 @@ class sklearnBBox(AbstractBBox):
 
     def predict_proba(self, X):
         return self.bbox.predict_proba(X)
+    
