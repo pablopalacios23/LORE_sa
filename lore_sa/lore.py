@@ -94,6 +94,7 @@ class Lore(object):
 
         neighb_train_X = dec_neighbor[:, :]
         neighb_train_y = self.bbox.predict(neighb_train_X)
+
         neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1)).squeeze()
 
         self.surrogate.train(neighbour, neighb_train_yb)
