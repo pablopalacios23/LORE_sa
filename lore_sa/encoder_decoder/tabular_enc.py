@@ -116,7 +116,6 @@ class ColumnTransformerEnc(EncDec):
         self.target_encoder = OrdinalEncoder(dtype=np.int16)
 
         self.encoder.fit(mock_data)
-        
         self.target_encoder.fit(np.array(target_column).reshape(-1, 1))
 
         # print('transformers', self.encoder.transformers_)
@@ -235,18 +234,21 @@ class ColumnTransformerEnc(EncDec):
 
         return self.target_encoder.inverse_transform(Z)
 
-    def encode_target_class(self, X: np.array):
-        """
-        Encode the target class
-        :param X:
-        :return:
-        """
-        # print("Encoder categories:", self.target_encoder.categories_)
-        # print("Input sample:", X[:5])
+    def encode_target_class(self, X: np.array, categories_global=None):
+        if categories_global is not None:
+            self.target_encoder.categories_ = [np.array(categories_global)]
 
-        if X.dtype.kind in {'i', 'u'}:  # Si son enteros
+        if X.dtype.kind in {'i', 'u'}:
             categories = self.target_encoder.categories_[0]
-            X = np.array([[categories[i]] for i in X.ravel()])
+            # print("categories: ", categories)
+
+            # print("X.ravel(): ", X.ravel())
+
+            X_indices = X.ravel()
+            X_indices = np.clip(X_indices, 0, len(categories) - 1)
+            X = categories.take(X_indices)
+            X = X.reshape(-1, 1)
+            # print("X: ", X)
         return self.target_encoder.transform(X)
     
     def set_classes(self, class_list):

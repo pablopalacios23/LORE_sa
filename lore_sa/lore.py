@@ -78,7 +78,7 @@ class Lore(object):
         self.class_name = dataset.class_name
 
 
-    def explain(self, x: np.array, num_instances=100, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None):
+    def explain(self, x: np.array, num_instances=250, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None, UNIQUE_LABELS=None):
 
         """
         Explains a single instance of the dataset.
@@ -93,9 +93,13 @@ class Lore(object):
         dec_neighbor = self.encoder.decode(neighbour)
 
         neighb_train_X = dec_neighbor[:, :]
+
         neighb_train_y = self.bbox.predict(neighb_train_X)
 
-        neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1)).squeeze()
+
+        neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1), categories_global=UNIQUE_LABELS).squeeze()
+
+        # print("neighb_train_yb: ",neighb_train_yb)
 
         self.surrogate.train(neighbour, neighb_train_yb)
 
@@ -146,5 +150,5 @@ class TabularGeneticGeneratorLore(Lore):
         surrogate = EnsembleDecisionTreeSurrogate(n_estimators=1)
         super().__init__(bbox, dataset, encoder, generator, surrogate)
 
-    def explain_instance(self, x: np.array, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None):
-        return self.explain(x.values, merge=merge, num_classes=num_classes, feature_names=feature_names, categorical_features=categorical_features, global_mapping=global_mapping)
+    def explain_instance(self, x: np.array, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None, UNIQUE_LABELS=None):
+        return self.explain(x.values, merge=merge, num_classes=num_classes, feature_names=feature_names, categorical_features=categorical_features, global_mapping=global_mapping, UNIQUE_LABELS=UNIQUE_LABELS)
