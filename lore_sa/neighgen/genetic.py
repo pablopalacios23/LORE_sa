@@ -375,54 +375,31 @@ class GeneticGenerator(LegacyGeneticGenerator):
         """
         new_x = z.copy()
 
+        # determine the number of instances to generate for the same class and for a different class
         num_samples_eq = int(np.round(num_instances * 0.5))
         num_samples_neq = num_instances - num_samples_eq
 
-        # Generar Z_eq (misma clase)
-        toolbox_eq = self.setup_toolbox(z, self.population_fitness_equal(z), num_samples_eq)
+        # generate the instances for the same class
+        toolbox_eq = self.setup_toolbox(z, self.population_fitness_equal(z), num_samples_eq) # Se crea la población inicial para vecinos con misma clase (Z_eq) y se inicializa i implícitamente dentro de fit.
         population_eq, halloffame_eq, logbook_eq = self.fit(toolbox_eq, num_samples_eq)
         Z_eq = self.add_halloffame(population_eq, halloffame_eq)
+        # print(logbook_eq)
 
-        # Generar Z_neq (clases distintas)
+        # generate the instances for a different class
         toolbox_noteq = self.setup_toolbox(z, self.population_fitness_notequal(z), num_samples_neq)
         population_noteq, halloffame_noteq, logbook_noteq = self.fit(toolbox_noteq, num_samples_neq)
         Z_noteq = self.add_halloffame(population_noteq, halloffame_noteq)
+        # print(logbook_noteq)
 
-        # 🔧 EXTRA: Asegurar que aparezcan TODAS las clases distintas
-        x_decoded = self.encoder.decode(z.reshape(1, -1))
-        current_class = self.bbox.predict(x_decoded)[0]
-
-        class_col = self.dataset.class_name
-        X = self.dataset.df.drop(columns=[class_col]) if class_col in self.dataset.df.columns else self.dataset.df
-
-        # Codificamos antes de decodificar para evitar errores con strings
-        X_encoded = self.encoder.encode(X.values)
-        decoded_X = self.encoder.decode(X_encoded)
-
-        all_classes = np.unique(self.bbox.predict(decoded_X))
-        target_classes = [c for c in all_classes if c != current_class]
-
-        Z_noteq_decoded = self.encoder.decode(Z_noteq)
-        classes_in_Z_neq = np.unique(self.bbox.predict(Z_noteq_decoded))
-
-        missing_classes = [c for c in target_classes if c not in classes_in_Z_neq]
-
-        for missing_class in missing_classes:
-            def force_fitness(z1):
-                x1 = self.encoder.decode(np.array(z1).reshape(1, -1))
-                y1 = self.bbox.predict(x1)[0]
-                return (1.0 if y1 == missing_class else 0.0,)
-
-            toolbox_forced = self.setup_toolbox(z, force_fitness, 1)
-            pop_f, hof_f, _ = self.fit(toolbox_forced, 1)
-            forced_instance = self.add_halloffame(pop_f, hof_f)
-            Z_noteq = np.concatenate([Z_noteq, forced_instance], axis=0)
-
-        # Fusionar Z_eq + Z_neq y balancear
+        # concatenate the two sets of instances
         Z = np.concatenate((Z_eq, Z_noteq), axis=0)
+
+        # balance the instances according to the minority class
         Z = super(GeneticGenerator, self).balance_neigh(z, Z, num_instances)
+        # the first element is the input instance
+
         Z[0] = new_x
-        return Z
+        return Z  # Z es la combinación de Z_eq y Z_noteq, balanceada.
 
     # def add_halloffame(self, population, halloffame):
     #     fitness_values = [p.fitness.wvalues[0] for p in population]

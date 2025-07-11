@@ -77,6 +77,14 @@ class Lore(object):
         self.surrogate = surrogate
         self.class_name = dataset.class_name
 
+    def binarize_onehot_features(self, neighbour, feature_names, categorical_features):
+        neighbour = neighbour.copy()
+        for i, col in enumerate(feature_names):
+            # Detecta si la columna es one-hot de alguna categórica
+            if any(col.startswith(cat + "_") for cat in categorical_features):
+                neighbour[:, i] = (neighbour[:, i] > 0.5).astype(float)
+        return neighbour
+
 
     def explain(self, x: np.array, num_instances=250, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None, UNIQUE_LABELS=None):
 
@@ -94,14 +102,13 @@ class Lore(object):
 
         neighb_train_X = dec_neighbor[:, :]
 
-        neighb_train_y = self.bbox.predict(neighb_train_X)
+        neighbour = self.binarize_onehot_features(neighb_train_X, feature_names, categorical_features)
 
+        neighb_train_y = self.bbox.predict(neighb_train_X)
 
         neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1), categories_global=UNIQUE_LABELS).squeeze()
 
-        # print("neighb_train_yb: ",neighb_train_yb)
-
-        self.surrogate.train(neighbour, neighb_train_yb)
+        self.surrogate.train(neighbour, neighb_train_yb, features = feature_names)
 
         # 👉 Si NO se hace merge, NO devolvemos regla ni contrafactuales
         if not merge:
