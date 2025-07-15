@@ -421,7 +421,7 @@ class EnsembleDecisionTreeSurrogate(Surrogate):
         for _ in range(self.n_estimators):
             Z_sample, Yb_sample = resample(Z, Yb)
 
-            tree = DecisionTreeClassifier()
+            tree = DecisionTreeClassifier(max_depth=5, min_samples_split=2, random_state=42)
             tree.fit(Z_sample, Yb_sample)
 
             # print("export_text")
@@ -435,7 +435,7 @@ class EnsembleDecisionTreeSurrogate(Surrogate):
         return dt_surrogate.get_rule(z, encoder)
 
     def get_counterfactual_rules(self, z, Z, Yb, encoder, **kwargs):
-        dt_surrogate = DecisionTreeSurrogate(max_depth=5, min_samples_split=2, random_state=42)
+        dt_surrogate = DecisionTreeSurrogate()
         dt_surrogate.dt = self.trees[0]
         return dt_surrogate.get_counterfactual_rules(z, Z, Yb, encoder, **kwargs)
     
