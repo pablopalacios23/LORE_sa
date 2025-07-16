@@ -986,76 +986,82 @@ class SuperTree(Surrogate):
         return createNode(0)
     
     # def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
-    #                    categorical_features=None, global_mapping=None, used_feats=None,
-    #                    remaining_categorical_vals=None, excluded_categorical_vars=None):
-    #     indent = "  " * level
-    #     roots = [r for r in roots if r is not None]
+    #                   categorical_features=None, global_mapping=None, used_feats=None):
 
-    #     # print(f"{indent}🔁 Nivel {level}: {len(roots)} nodos a fusionar")
-
-    #     if not roots:
-    #         # print(f"{indent}🛑 Sin nodos, retorno None")
-    #         return None
-
+    #     # Caso base: todos hoja → fusiona clases
     #     if all(r.is_leaf for r in roots):
-    #         votes = [np.argmax(r.labels) for r in roots if r.labels is not None]
+    #         votes = [np.argmax(r.labels) for r in roots]
     #         val, cou = np.unique(votes, return_counts=True)
     #         labels = np.zeros(num_classes)
     #         for v, c in zip(val, cou):
     #             labels[v] = c
-    #         # print(f"{indent}🌿 Todos son hojas → clase mayoritaria: {labels}")
     #         super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #         if level == 0:
-    #             self.root = super_node
+    #         if level == 0: self.root = super_node
     #         return super_node
 
-    #     val, cou = np.unique([r.feat for r in roots if r.feat is not None], return_counts=True)
-    #     if len(val) == 0:
-    #         majority = [np.argmax(r.labels) for r in roots if r.is_leaf and r.labels is not None]
+    #     # Selecciona feature más frecuente
+    #     feats = [r.feat for r in roots if r.feat is not None]
+    #     if not feats:
+    #         # Sin nodos internos válidos, hoja mayoría
+    #         majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
     #         labels = np.zeros(num_classes)
     #         for v in majority:
     #             labels[v] += 1
-    #         # print(f"{indent}⚠️ Sin nodos internos válidos, usando clase mayoría: {labels}")
     #         super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #         if level == 0:
-    #             self.root = super_node
+    #         if level == 0: self.root = super_node
     #         return super_node
 
-    #     Xf = val[np.argmax(cou)]
-    #     fname = feature_names[Xf] if feature_names else f"X_{Xf}"
-    #     # print(f"{indent}📌 Variable más usada: {fname}")
+    #     Xf = max(set(feats), key=feats.count)
+    #     # Umbrales presentes para ese feature
+    #     threshs = sorted(set(r.thresh for r in roots if r.feat == Xf))
+        
+    #     if not threshs:
+    #         # Todos nodos hoja o sin splits para este feature, mayoría
+    #         majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
+    #         labels = np.zeros(num_classes)
+    #         for v in majority:
+    #             labels[v] += 1
+    #         super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
+    #         if level == 0: self.root = super_node
+    #         return super_node
 
-    #     thresholds = sorted(set(r.thresh for r in roots if r.feat == Xf))
-    #     # print(f"{indent}📊 Umbrales usados: {thresholds}")
-    #     If = np.array([[-np.inf] + thresholds + [np.inf]]).T
-    #     If = np.hstack([If[:-1], If[1:]])
-
-    #     branches = [self.computeBranch(r, If, Xf, verbose=False) for r in roots]
+    #     # Sólo el primer threshold para binarizar
+    #     t = threshs[0]
+    #     # Binariza ramas (< t y >= t)
+    #     intervals = [(-float('inf'), t), (t, float('inf'))]
+    #     branches = [self.computeBranch(r, intervals, Xf) for r in roots]
 
     #     children = []
-    #     for j in range(len(If)):
-    #         child_roots = [b[j] for b in branches if b[j] is not None]
-    #         # print(f"{indent}  └─ Intervalo {j}: {If[j]} → {len(child_roots)} nodos")
+    #     for j in range(2):
+    #         child_roots = [b[j] for b in branches]
+    #         # Para la siguiente recursión, quita el threshold ya usado
+    #         children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names))
 
-    #         if child_roots:
-    #             child = self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names)
-    #         else:
-    #             labels = np.zeros(num_classes)
-    #             for r in roots:
-    #                 if r.is_leaf and r.labels is not None:
-    #                     labels += r.labels
-    #                 elif r.labels is not None:
-    #                     labels[np.argmax(r.labels)] += 1
-    #             # print(f"{indent}    🪹 Sin nodos → hoja por mayoría: {labels}")
-    #             child = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
-
-    #         children.append(child)
-
-    #     # print(f"{indent}✅ SuperNode creado en nivel {level} con feature {fname} y {len(children)} hijos")
-    #     super_node = self.SuperNode(feat_num=Xf, intervals=If[:, 1], children=children, level=level)
-    #     if level == 0:
-    #         self.root = super_node
+    #     super_node = self.SuperNode(feat_num=Xf, intervals=[t], children=children, level=level)
+    #     if level == 0: self.root = super_node
     #     return super_node
+
+    # def computeBranch(self, node, intervals, feature_idx, verbose=False):
+    #     if node is None:
+    #         return [None] * len(intervals)
+    #     if node.is_leaf:
+    #         return [self.Node(labels=node.labels, is_leaf=True) for _ in intervals]
+    #     if node.feat != feature_idx:
+    #         left = self.computeBranch(node._left_child, intervals, feature_idx)
+    #         right = self.computeBranch(node._right_child, intervals, feature_idx)
+    #         return [self.Node(feat_num=node.feat, thresh=node.thresh, left_child=l, right_child=r) for l, r in zip(left, right)]
+    #     # Binariza sólo por el primer threshold
+    #     splits = []
+    #     for a, b in intervals:
+    #         if node.thresh <= a:
+    #             splits.append(self.computeBranch(node._right_child, [(a, b)], feature_idx)[0])
+    #         elif node.thresh >= b:
+    #             splits.append(self.computeBranch(node._left_child, [(a, b)], feature_idx)[0])
+    #         else:
+    #             left = self.computeBranch(node._left_child, [(a, node.thresh)], feature_idx)[0]
+    #             right = self.computeBranch(node._right_child, [(node.thresh, b)], feature_idx)[0]
+    #             splits.append(self.Node(feat_num=feature_idx, thresh=node.thresh, left_child=left, right_child=right))
+    #     return splits
 
 
     def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
@@ -1126,271 +1132,6 @@ class SuperTree(Surrogate):
                 splits.append(self.Node(feat_num=feature_idx, thresh=node.thresh, left_child=left, right_child=right))
         return splits
     
-
-    # def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
-    #                   categorical_features=None, global_mapping=None, used_feats=None,
-    #                   remaining_categorical_vals=None, excluded_categorical_vars=None):
-
-    #     indent = "  " * level
-    #     roots = [r for r in roots if r is not None]
-
-    #     if used_feats is None:
-    #         used_feats = set()
-    #     if excluded_categorical_vars is None:
-    #         excluded_categorical_vars = set()
-
-    #     if not roots:
-    #         return None
-
-    #     if all(r.is_leaf for r in roots):
-    #         votes = [np.argmax(r.labels) for r in roots if r.labels is not None]
-    #         val, cou = np.unique(votes, return_counts=True)
-    #         labels = np.zeros(num_classes)
-    #         for v, c in zip(val, cou):
-    #             labels[v] = c
-    #         node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #         if level == 0:
-    #             self.root = node
-    #         return node
-
-    #     val, cou = np.unique([r.feat for r in roots if r.feat is not None], return_counts=True)
-    #     feat_counts = [(f, cou[i]) for i, f in enumerate(val)
-    #                 if f not in used_feats and feature_names[f] not in excluded_categorical_vars]
-
-    #     if not feat_counts:
-    #         labels = np.zeros(num_classes)
-    #         for r in roots:
-    #             if r.labels is not None:
-    #                 labels += r.labels
-    #         node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #         if level == 0:
-    #             self.root = node
-    #         return node
-
-    #     Xf = max(feat_counts, key=lambda x: x[1])[0]
-    #     fname = feature_names[Xf]
-    #     is_categorical = categorical_features and fname in categorical_features
-
-    #     if is_categorical:
-    #         # SOLO LOS VALORES PRESENTES EN LOS ÁRBOLES
-    #         used_values = set()
-    #         for r in roots:
-    #             if r.feat == Xf and r.thresh is not None:
-    #                 idx = int(r.thresh)
-    #                 if idx < len(global_mapping[fname]):
-    #                     used_values.add(idx)
-    #         remaining_categorical_vals = sorted(used_values)
-    #         if not remaining_categorical_vals:
-    #             # Si no quedan, hoja
-    #             labels = np.zeros(num_classes)
-    #             for r in roots:
-    #                 if r.labels is not None:
-    #                     labels += r.labels
-    #             node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #             if level == 0:
-    #                 self.root = node
-    #             return node
-
-    #         split_val_idx = remaining_categorical_vals[0]
-    #         remaining_vals = [v for v in remaining_categorical_vals if v != split_val_idx]
-
-    #         branches = self.computeBranchCategorical(
-    #             node=roots,
-    #             feat_num=Xf,
-    #             global_values=[split_val_idx],
-    #             excluded_values=set()
-    #         )
-
-    #         left_roots = [l for l, _ in branches]
-    #         right_roots = [r for _, r in branches]
-
-    #         # print(f"Antes de mergeDecisionTrees (profundidad {level}):")
-    #         # print(self._to_str(self.SuperNode.from_dict(roots[0].to_dict())))
-
-    #         # IZQUIERDA: valor fijado, ya no se puede volver a dividir por esta variable
-    #         left = self.mergeDecisionTrees(
-    #             roots=left_roots,
-    #             num_classes=num_classes,
-    #             level=level + 1,
-    #             feature_names=feature_names,
-    #             categorical_features=categorical_features,
-    #             global_mapping=global_mapping,
-    #             used_feats=used_feats.copy(),
-    #             remaining_categorical_vals=None,
-    #             excluded_categorical_vars=excluded_categorical_vars | {fname}
-    #         )
-    #         # print(f"Izquierda (profundidad {level}):")
-    #         # print(self._to_str(self.SuperNode.from_dict(roots[0].to_dict())))
-
-    #         # DERECHA: quedan valores por explorar, puedes seguir dividiendo por la variable
-    #         right = self.mergeDecisionTrees(
-    #             roots=right_roots,
-    #             num_classes=num_classes,
-    #             level=level + 1,
-    #             feature_names=feature_names,
-    #             categorical_features=categorical_features,
-    #             global_mapping=global_mapping,
-    #             used_feats=used_feats.copy(),
-    #             remaining_categorical_vals=remaining_vals,
-    #             excluded_categorical_vars=excluded_categorical_vars
-    #         )
-    #         # print(f"Derecha (profundidad {level}):")
-    #         # print(self._to_str(self.SuperNode.from_dict(roots[0].to_dict())))
-
-    #         node = self.SuperNode(
-    #             is_leaf=False,
-    #             labels=np.mean([r.labels for r in roots if r.labels is not None], axis=0),
-    #             feat_num=Xf,
-    #             thresh=split_val_idx,
-    #             intervals=[split_val_idx],
-    #             children=[left, right],
-    #             level=level
-    #         )
-    #         if level == 0:
-    #             self.root = node
-    #         return node
-
-    #     else:
-    #         thresholds = [r.thresh for r in roots if r.feat == Xf and r.thresh is not None]
-    #         if not thresholds:
-    #             labels = np.zeros(num_classes)
-    #             for r in roots:
-    #                 if r.labels is not None:
-    #                     labels += r.labels
-    #             node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #             if level == 0:
-    #                 self.root = node
-    #             return node
-
-    #         split_val = np.median(thresholds)
-    #         branches = self.computeBranch(roots, split_val, Xf, verbose=False)
-
-    #         left_roots = [l for l, _ in branches]
-    #         right_roots = [r for _, r in branches]
-
-    #         left = self.mergeDecisionTrees(
-    #             roots=left_roots,
-    #             num_classes=num_classes,
-    #             level=level + 1,
-    #             feature_names=feature_names,
-    #             categorical_features=categorical_features,
-    #             global_mapping=global_mapping,
-    #             used_feats=used_feats.copy(),
-    #             excluded_categorical_vars=excluded_categorical_vars.copy()
-    #         )
-
-    #         right = self.mergeDecisionTrees(
-    #             roots=right_roots,
-    #             num_classes=num_classes,
-    #             level=level + 1,
-    #             feature_names=feature_names,
-    #             categorical_features=categorical_features,
-    #             global_mapping=global_mapping,
-    #             used_feats=used_feats.copy(),
-    #             excluded_categorical_vars=excluded_categorical_vars.copy()
-    #         )
-
-    #         node = self.SuperNode(
-    #             is_leaf=False,
-    #             labels=np.mean([r.labels for r in roots if r.labels is not None], axis=0),
-    #             feat_num=Xf,
-    #             thresh=split_val,
-    #             intervals=[split_val],
-    #             children=[left, right],
-    #             level=level
-    #         )
-    #         if level == 0:
-    #             self.root = node
-    #         return node
-            
-
-    # def computeBranchCategorical(self, node, feat_num, global_values, excluded_values=None):
-    #     """
-    #     Divide cada árbol en ramas izquierda/derecha según si feat == global_values[0].
-    #     Si no se puede dividir directamente, se intenta propagar recursivamente.
-    #     """
-    #     if excluded_values is None:
-    #         excluded_values = set()
-
-    #     split_val = global_values[0]
-    #     branches = []
-
-    #     for n in node:
-    #         if n is None:
-    #             branches.append((None, None))
-
-    #         elif n.is_leaf:
-    #             # Se copia como está
-    #             branches.append((
-    #                 self.Node(labels=n.labels, is_leaf=True),
-    #                 self.Node(labels=n.labels, is_leaf=True)
-    #             ))
-
-    #         elif n.feat == feat_num and n.thresh == split_val:
-    #             # División directa
-    #             branches.append((n._left_child, n._right_child))
-
-    #         else:
-    #             # Recurre a los hijos y reconstruye el árbol
-    #             left_child = self.computeBranchCategorical(
-    #                 [n._left_child], feat_num, global_values, excluded_values=excluded_values
-    #             )[0][0]
-
-    #             right_child = self.computeBranchCategorical(
-    #                 [n._right_child], feat_num, global_values, excluded_values=excluded_values
-    #             )[0][1]
-
-    #             branches.append((
-    #                 self.Node(
-    #                     is_leaf=n.is_leaf,
-    #                     feat_num=n.feat,
-    #                     thresh=n.thresh,
-    #                     labels=n.labels,
-    #                     left_child=left_child,
-    #                     right_child=right_child
-    #                 ),
-    #                 self.Node(
-    #                     is_leaf=n.is_leaf,
-    #                     feat_num=n.feat,
-    #                     thresh=n.thresh,
-    #                     labels=n.labels,
-    #                     left_child=left_child,
-    #                     right_child=right_child
-    #                 )
-    #             ))
-
-    #     return branches
-
-
-
-
-    # def computeBranch(self, nodes, split_val, feat_idx, verbose=False):
-    #     branches = []
-    #     for i, n in enumerate(nodes):
-    #         if n is None:
-    #             branches.append((None, None))
-    #         elif n.is_leaf:
-    #             branches.append((
-    #                 self.Node(labels=n.labels, is_leaf=True),
-    #                 self.Node(labels=n.labels, is_leaf=True)
-    #             ))
-    #         elif n.feat == feat_idx:
-    #             # if verbose:
-    #             #     print(f"   Nodo {i+1}: división directa en feat {feat_idx} con threshold {n.thresh}")
-    #             branches.append((n._left_child, n._right_child))
-    #         else:
-    #             left = self.computeBranch([n._left_child], split_val, feat_idx)[0][0]
-    #             right = self.computeBranch([n._right_child], split_val, feat_idx)[0][1]
-    #             branches.append((
-    #                 self.Node(feat_num=n.feat, thresh=n.thresh, left_child=left, right_child=right),
-    #                 self.Node(feat_num=n.feat, thresh=n.thresh, left_child=left, right_child=right)
-    #             ))
-    #     return branches
-
-
-
-
-
 
 
     class SuperNode:
