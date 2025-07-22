@@ -428,6 +428,10 @@ class EnsembleDecisionTreeSurrogate(Surrogate):
             # print(export_text(tree, feature_names=features))
             
             self.trees.append(tree)
+        
+    def predict(self, Z):
+        # Si tienes más de un árbol, puedes hacer votación, pero con uno solo basta esto:
+        return self.trees[0].predict(Z)
 
     def get_rule(self, z, encoder):
         dt_surrogate = DecisionTreeSurrogate()
@@ -578,133 +582,133 @@ class SuperTree(Surrogate):
             self.root = prune(self.root)
         # print("✅ Poda completa finalizada")
 
-    def merge_equal_class_leaves(self): # fusionar hojas adyacentes con la misma clase (aunque no vengan del mismo padre)
-        # print("🔁 Buscando ramas adyacentes que puedan fusionarse")
+    # def merge_equal_class_leaves(self): # PARA EL ALGORITMO VIEJO EL QUE PERMITE MULTINARIO
+    #     # print("🔁 Buscando ramas adyacentes que puedan fusionarse")
 
-        def merge_adjacent(node):
-            if node.is_leaf or not node.children:
-                return node
-
-            node.children = [merge_adjacent(child) for child in node.children]
-
-            new_children = []
-            new_intervals = []
-            current_group = []
-            current_interval = []
-
-            for i, child in enumerate(node.children):
-                if child.is_leaf:
-                    if not current_group:
-                        current_group = [child]
-                        current_interval = [node.intervals[i - 1] if i > 0 else -float("inf"), node.intervals[i]]
-                    else:
-                        prev_class = np.argmax(current_group[0].labels)
-                        curr_class = np.argmax(child.labels)
-                        if curr_class == prev_class:
-                            current_group.append(child)
-                            current_interval[1] = node.intervals[i]
-                        else:
-                            merged = self._fuse_group(current_group, node.level + 1)
-                            new_children.append(merged)
-                            new_intervals.append(current_interval[1])
-                            current_group = [child]
-                            current_interval = [node.intervals[i - 1], node.intervals[i]]
-                else:
-                    if current_group:
-                        merged = self._fuse_group(current_group, node.level + 1)
-                        new_children.append(merged)
-                        new_intervals.append(current_interval[1])
-                        current_group = []
-                    new_children.append(child)
-                    new_intervals.append(node.intervals[i])
-
-            if current_group:
-                merged = self._fuse_group(current_group, node.level + 1)
-                new_children.append(merged)
-                new_intervals.append(current_interval[1])
-
-            node.children = new_children
-            node.intervals = new_intervals
-            return node
-
-        if self.root:
-            self.root = merge_adjacent(self.root)
-
-    # def merge_equal_class_leaves(self):
     #     def merge_adjacent(node):
-    #         if node.is_leaf:
+    #         if node.is_leaf or not node.children:
     #             return node
 
-    #         # Si es binario y ambos hijos son hojas con misma clase → fusión total
-    #         if hasattr(node, "children") and node.children and len(node.children) == 2:
-    #             left, right = node.children
-    #             if left.is_leaf and right.is_leaf:
-    #                 left_class = np.argmax(left.labels)
-    #                 right_class = np.argmax(right.labels)
-    #                 if left_class == right_class:
-    #                     # Fusionar todo el nodo por redundancia
-    #                     merged = self._fuse_group([left, right], node.level)
-    #                     return merged
+    #         node.children = [merge_adjacent(child) for child in node.children]
 
-    #         # Recursión normal
-    #         if hasattr(node, "children"):
-    #             node.children = [merge_adjacent(child) for child in node.children]
+    #         new_children = []
+    #         new_intervals = []
+    #         current_group = []
+    #         current_interval = []
 
-    #             if not node.intervals or len(node.intervals) < 1 or len(node.children) <= 2:
-    #                 return node  # Evitar errores
-
-    #             new_children = []
-    #             new_intervals = []
-    #             current_group = []
-    #             current_interval = []
-
-    #             for i, child in enumerate(node.children):
-    #                 if i >= len(node.intervals):
-    #                     break
-
-    #                 if child.is_leaf:
-    #                     if not current_group:
-    #                         current_group = [child]
-    #                         current_interval = [
-    #                             node.intervals[i - 1] if i > 0 else -float("inf"),
-    #                             node.intervals[i]
-    #                         ]
-    #                     else:
-    #                         prev_class = np.argmax(current_group[0].labels)
-    #                         curr_class = np.argmax(child.labels)
-    #                         if curr_class == prev_class:
-    #                             current_group.append(child)
-    #                             current_interval[1] = node.intervals[i]
-    #                         else:
-    #                             merged = self._fuse_group(current_group, node.level + 1)
-    #                             new_children.append(merged)
-    #                             new_intervals.append(current_interval[1])
-    #                             current_group = [child]
-    #                             current_interval = [
-    #                                 node.intervals[i - 1] if i > 0 else -float("inf"),
-    #                                 node.intervals[i]
-    #                             ]
+    #         for i, child in enumerate(node.children):
+    #             if child.is_leaf:
+    #                 if not current_group:
+    #                     current_group = [child]
+    #                     current_interval = [node.intervals[i - 1] if i > 0 else -float("inf"), node.intervals[i]]
     #                 else:
-    #                     if current_group:
+    #                     prev_class = np.argmax(current_group[0].labels)
+    #                     curr_class = np.argmax(child.labels)
+    #                     if curr_class == prev_class:
+    #                         current_group.append(child)
+    #                         current_interval[1] = node.intervals[i]
+    #                     else:
     #                         merged = self._fuse_group(current_group, node.level + 1)
     #                         new_children.append(merged)
     #                         new_intervals.append(current_interval[1])
-    #                         current_group = []
-    #                     new_children.append(child)
-    #                     new_intervals.append(node.intervals[i])
+    #                         current_group = [child]
+    #                         current_interval = [node.intervals[i - 1], node.intervals[i]]
+    #             else:
+    #                 if current_group:
+    #                     merged = self._fuse_group(current_group, node.level + 1)
+    #                     new_children.append(merged)
+    #                     new_intervals.append(current_interval[1])
+    #                     current_group = []
+    #                 new_children.append(child)
+    #                 new_intervals.append(node.intervals[i])
 
-    #             if current_group:
-    #                 merged = self._fuse_group(current_group, node.level + 1)
-    #                 new_children.append(merged)
-    #                 new_intervals.append(current_interval[1])
+    #         if current_group:
+    #             merged = self._fuse_group(current_group, node.level + 1)
+    #             new_children.append(merged)
+    #             new_intervals.append(current_interval[1])
 
-    #             node.children = new_children
-    #             node.intervals = new_intervals
-
+    #         node.children = new_children
+    #         node.intervals = new_intervals
     #         return node
 
     #     if self.root:
     #         self.root = merge_adjacent(self.root)
+
+    def merge_equal_class_leaves(self): # PARA EL ALGORITMO NUEVO QUE HACE EL SUPERTREE BINARIO SOLO
+        def merge_adjacent(node):
+            if node.is_leaf:
+                return node
+
+            # Si es binario y ambos hijos son hojas con misma clase → fusión total
+            if hasattr(node, "children") and node.children and len(node.children) == 2:
+                left, right = node.children
+                if left.is_leaf and right.is_leaf:
+                    left_class = np.argmax(left.labels)
+                    right_class = np.argmax(right.labels)
+                    if left_class == right_class:
+                        # Fusionar todo el nodo por redundancia
+                        merged = self._fuse_group([left, right], node.level)
+                        return merged
+
+            # Recursión normal
+            if hasattr(node, "children"):
+                node.children = [merge_adjacent(child) for child in node.children]
+
+                if not node.intervals or len(node.intervals) < 1 or len(node.children) <= 2:
+                    return node  # Evitar errores
+
+                new_children = []
+                new_intervals = []
+                current_group = []
+                current_interval = []
+
+                for i, child in enumerate(node.children):
+                    if i >= len(node.intervals):
+                        break
+
+                    if child.is_leaf:
+                        if not current_group:
+                            current_group = [child]
+                            current_interval = [
+                                node.intervals[i - 1] if i > 0 else -float("inf"),
+                                node.intervals[i]
+                            ]
+                        else:
+                            prev_class = np.argmax(current_group[0].labels)
+                            curr_class = np.argmax(child.labels)
+                            if curr_class == prev_class:
+                                current_group.append(child)
+                                current_interval[1] = node.intervals[i]
+                            else:
+                                merged = self._fuse_group(current_group, node.level + 1)
+                                new_children.append(merged)
+                                new_intervals.append(current_interval[1])
+                                current_group = [child]
+                                current_interval = [
+                                    node.intervals[i - 1] if i > 0 else -float("inf"),
+                                    node.intervals[i]
+                                ]
+                    else:
+                        if current_group:
+                            merged = self._fuse_group(current_group, node.level + 1)
+                            new_children.append(merged)
+                            new_intervals.append(current_interval[1])
+                            current_group = []
+                        new_children.append(child)
+                        new_intervals.append(node.intervals[i])
+
+                if current_group:
+                    merged = self._fuse_group(current_group, node.level + 1)
+                    new_children.append(merged)
+                    new_intervals.append(current_interval[1])
+
+                node.children = new_children
+                node.intervals = new_intervals
+
+            return node
+
+        if self.root:
+            self.root = merge_adjacent(self.root)
 
 
     def print_tree(self, node=None, prefix=""):
@@ -985,130 +989,61 @@ class SuperTree(Surrogate):
 
         return createNode(0)
     
-    # def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
-    #                   categorical_features=None, global_mapping=None, used_feats=None):
-
-    #     # Caso base: todos hoja → fusiona clases
-    #     if all(r.is_leaf for r in roots):
-    #         votes = [np.argmax(r.labels) for r in roots]
-    #         val, cou = np.unique(votes, return_counts=True)
-    #         labels = np.zeros(num_classes)
-    #         for v, c in zip(val, cou):
-    #             labels[v] = c
-    #         super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #         if level == 0: self.root = super_node
-    #         return super_node
-
-    #     # Selecciona feature más frecuente
-    #     feats = [r.feat for r in roots if r.feat is not None]
-    #     if not feats:
-    #         # Sin nodos internos válidos, hoja mayoría
-    #         majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
-    #         labels = np.zeros(num_classes)
-    #         for v in majority:
-    #             labels[v] += 1
-    #         super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #         if level == 0: self.root = super_node
-    #         return super_node
-
-    #     Xf = max(set(feats), key=feats.count)
-    #     # Umbrales presentes para ese feature
-    #     threshs = sorted(set(r.thresh for r in roots if r.feat == Xf))
-        
-    #     if not threshs:
-    #         # Todos nodos hoja o sin splits para este feature, mayoría
-    #         majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
-    #         labels = np.zeros(num_classes)
-    #         for v in majority:
-    #             labels[v] += 1
-    #         super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-    #         if level == 0: self.root = super_node
-    #         return super_node
-
-    #     # Sólo el primer threshold para binarizar
-    #     t = threshs[0]
-    #     # Binariza ramas (< t y >= t)
-    #     intervals = [(-float('inf'), t), (t, float('inf'))]
-    #     branches = [self.computeBranch(r, intervals, Xf) for r in roots]
-
-    #     children = []
-    #     for j in range(2):
-    #         child_roots = [b[j] for b in branches]
-    #         # Para la siguiente recursión, quita el threshold ya usado
-    #         children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names))
-
-    #     super_node = self.SuperNode(feat_num=Xf, intervals=[t], children=children, level=level)
-    #     if level == 0: self.root = super_node
-    #     return super_node
-
-    # def computeBranch(self, node, intervals, feature_idx, verbose=False):
-    #     if node is None:
-    #         return [None] * len(intervals)
-    #     if node.is_leaf:
-    #         return [self.Node(labels=node.labels, is_leaf=True) for _ in intervals]
-    #     if node.feat != feature_idx:
-    #         left = self.computeBranch(node._left_child, intervals, feature_idx)
-    #         right = self.computeBranch(node._right_child, intervals, feature_idx)
-    #         return [self.Node(feat_num=node.feat, thresh=node.thresh, left_child=l, right_child=r) for l, r in zip(left, right)]
-    #     # Binariza sólo por el primer threshold
-    #     splits = []
-    #     for a, b in intervals:
-    #         if node.thresh <= a:
-    #             splits.append(self.computeBranch(node._right_child, [(a, b)], feature_idx)[0])
-    #         elif node.thresh >= b:
-    #             splits.append(self.computeBranch(node._left_child, [(a, b)], feature_idx)[0])
-    #         else:
-    #             left = self.computeBranch(node._left_child, [(a, node.thresh)], feature_idx)[0]
-    #             right = self.computeBranch(node._right_child, [(node.thresh, b)], feature_idx)[0]
-    #             splits.append(self.Node(feat_num=feature_idx, thresh=node.thresh, left_child=left, right_child=right))
-    #     return splits
-
-
     def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
-                       categorical_features=None, global_mapping=None, used_feats=None,
-                       remaining_categorical_vals=None, excluded_categorical_vars=None):
-        
-        if all(r.is_leaf for r in roots): # Combinar etiquetas y crear hoja con la clase más votada
+                      categorical_features=None, global_mapping=None, used_feats=None):
+
+        # Caso base: todos hoja → fusiona clases
+        if all(r.is_leaf for r in roots):
             votes = [np.argmax(r.labels) for r in roots]
             val, cou = np.unique(votes, return_counts=True)
             labels = np.zeros(num_classes)
-            for j, v in enumerate(val):
-                labels[v] = cou[j]
-            super_node = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
-            self.root = super_node
+            for v, c in zip(val, cou):
+                labels[v] = c
+            super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
+            if level == 0: self.root = super_node
             return super_node
 
-        val, cou = np.unique([r.feat for r in roots if r.feat is not None], return_counts=True)
-        if np.sum(cou) < len(roots) / 2:
+        # Selecciona feature más frecuente
+        feats = [r.feat for r in roots if r.feat is not None]
+        if not feats:
+            # Sin nodos internos válidos, hoja mayoría
             majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
-            if len(majority) > 0:
-                val_out, cou_out = np.unique(majority, return_counts=True)
-                if np.max(cou_out) >= (len(roots) / 2) + 1:
-                    labels = np.zeros(num_classes)
-                    for j, v in enumerate(val_out):
-                        labels[v] = cou_out[j]
-                    super_node = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
-                    self.root = super_node
-                    return super_node
+            labels = np.zeros(num_classes)
+            for v in majority:
+                labels[v] += 1
+            super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
+            if level == 0: self.root = super_node
+            return super_node
 
-        Xf = val[np.argmax(cou)] # ← feature más común
-        If = sorted(set(r.thresh for r in roots if r.feat == Xf))
-        If = np.array([[-np.inf] + If + [np.inf]]).T
-        If = np.hstack([If[:-1], If[1:]])
+        Xf = max(set(feats), key=feats.count)
+        # Umbrales presentes para ese feature
+        threshs = sorted(set(r.thresh for r in roots if r.feat == Xf))
+        
+        if not threshs:
+            # Todos nodos hoja o sin splits para este feature, mayoría
+            majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
+            labels = np.zeros(num_classes)
+            for v in majority:
+                labels[v] += 1
+            super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
+            if level == 0: self.root = super_node
+            return super_node
 
-        branches = []
-        for r in roots:
-            branches.append(self.computeBranch(r, If, Xf, verbose=False)) # Divide los árboles según esos intervalos
+        # Sólo el primer threshold para binarizar
+        t = threshs[0]
+        # Binariza ramas (< t y >= t)
+        intervals = [(-float('inf'), t), (t, float('inf'))]
+        branches = [self.computeBranch(r, intervals, Xf) for r in roots]
 
         children = []
-        for j in range(len(If)):
+        for j in range(2):
             child_roots = [b[j] for b in branches]
-            children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1))
+            # Para la siguiente recursión, quita el threshold ya usado
+            children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names))
 
-        super_node = self.SuperNode(feat_num=Xf, intervals=If[:, 1], children=children, level=level)
-        self.root = super_node
-        return super_node # Al final tienes un árbol combinado en forma de SuperNode que contiene:
-    
+        super_node = self.SuperNode(feat_num=Xf, intervals=[t], children=children, level=level)
+        if level == 0: self.root = super_node
+        return super_node
 
     def computeBranch(self, node, intervals, feature_idx, verbose=False):
         if node is None:
@@ -1116,21 +1051,90 @@ class SuperTree(Surrogate):
         if node.is_leaf:
             return [self.Node(labels=node.labels, is_leaf=True) for _ in intervals]
         if node.feat != feature_idx:
-            left = self.computeBranch(node._left_child, intervals, feature_idx, verbose)
-            right = self.computeBranch(node._right_child, intervals, feature_idx, verbose)
+            left = self.computeBranch(node._left_child, intervals, feature_idx)
+            right = self.computeBranch(node._right_child, intervals, feature_idx)
             return [self.Node(feat_num=node.feat, thresh=node.thresh, left_child=l, right_child=r) for l, r in zip(left, right)]
-
+        # Binariza sólo por el primer threshold
         splits = []
         for a, b in intervals:
             if node.thresh <= a:
-                splits.append(self.computeBranch(node._right_child, [(a, b)], feature_idx, verbose)[0])
+                splits.append(self.computeBranch(node._right_child, [(a, b)], feature_idx)[0])
             elif node.thresh >= b:
-                splits.append(self.computeBranch(node._left_child, [(a, b)], feature_idx, verbose)[0])
+                splits.append(self.computeBranch(node._left_child, [(a, b)], feature_idx)[0])
             else:
-                left = self.computeBranch(node._left_child, [(a, node.thresh)], feature_idx, verbose)[0]
-                right = self.computeBranch(node._right_child, [(node.thresh, b)], feature_idx, verbose)[0]
+                left = self.computeBranch(node._left_child, [(a, node.thresh)], feature_idx)[0]
+                right = self.computeBranch(node._right_child, [(node.thresh, b)], feature_idx)[0]
                 splits.append(self.Node(feat_num=feature_idx, thresh=node.thresh, left_child=left, right_child=right))
         return splits
+
+
+    # def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
+    #                    categorical_features=None, global_mapping=None, used_feats=None,
+    #                    remaining_categorical_vals=None, excluded_categorical_vars=None):
+        
+    #     if all(r.is_leaf for r in roots): # Combinar etiquetas y crear hoja con la clase más votada
+    #         votes = [np.argmax(r.labels) for r in roots]
+    #         val, cou = np.unique(votes, return_counts=True)
+    #         labels = np.zeros(num_classes)
+    #         for j, v in enumerate(val):
+    #             labels[v] = cou[j]
+    #         super_node = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
+    #         self.root = super_node
+    #         return super_node
+
+    #     val, cou = np.unique([r.feat for r in roots if r.feat is not None], return_counts=True)
+    #     if np.sum(cou) < len(roots) / 2:
+    #         majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
+    #         if len(majority) > 0:
+    #             val_out, cou_out = np.unique(majority, return_counts=True)
+    #             if np.max(cou_out) >= (len(roots) / 2) + 1:
+    #                 labels = np.zeros(num_classes)
+    #                 for j, v in enumerate(val_out):
+    #                     labels[v] = cou_out[j]
+    #                 super_node = self.SuperNode(is_leaf=True, labels=labels, level=level + 1)
+    #                 self.root = super_node
+    #                 return super_node
+
+    #     Xf = val[np.argmax(cou)] # ← feature más común
+    #     If = sorted(set(r.thresh for r in roots if r.feat == Xf))
+    #     If = np.array([[-np.inf] + If + [np.inf]]).T
+    #     If = np.hstack([If[:-1], If[1:]])
+
+    #     branches = []
+    #     for r in roots:
+    #         branches.append(self.computeBranch(r, If, Xf, verbose=False)) # Divide los árboles según esos intervalos
+
+    #     children = []
+    #     for j in range(len(If)):
+    #         child_roots = [b[j] for b in branches]
+    #         children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1))
+
+    #     super_node = self.SuperNode(feat_num=Xf, intervals=If[:, 1], children=children, level=level)
+    #     self.root = super_node
+    #     return super_node # Al final tienes un árbol combinado en forma de SuperNode que contiene:
+    
+
+    # def computeBranch(self, node, intervals, feature_idx, verbose=False):
+    #     if node is None:
+    #         return [None] * len(intervals)
+    #     if node.is_leaf:
+    #         return [self.Node(labels=node.labels, is_leaf=True) for _ in intervals]
+    #     if node.feat != feature_idx:
+    #         left = self.computeBranch(node._left_child, intervals, feature_idx, verbose)
+    #         right = self.computeBranch(node._right_child, intervals, feature_idx, verbose)
+    #         return [self.Node(feat_num=node.feat, thresh=node.thresh, left_child=l, right_child=r) for l, r in zip(left, right)]
+
+    #     splits = []
+    #     for a, b in intervals:
+    #         if node.thresh <= a:
+    #             splits.append(self.computeBranch(node._right_child, [(a, b)], feature_idx, verbose)[0])
+    #         elif node.thresh >= b:
+    #             splits.append(self.computeBranch(node._left_child, [(a, b)], feature_idx, verbose)[0])
+    #         else:
+    #             left = self.computeBranch(node._left_child, [(a, node.thresh)], feature_idx, verbose)[0]
+    #             right = self.computeBranch(node._right_child, [(node.thresh, b)], feature_idx, verbose)[0]
+    #             splits.append(self.Node(feat_num=feature_idx, thresh=node.thresh, left_child=left, right_child=right))
+    #     return splits
     
 
 

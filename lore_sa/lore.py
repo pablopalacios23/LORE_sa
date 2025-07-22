@@ -9,6 +9,7 @@ from lore_sa.neighgen.neighborhood_generator import NeighborhoodGenerator
 from lore_sa.neighgen.random import RandomGenerator
 from lore_sa.surrogate import DecisionTreeSurrogate, Surrogate
 from lore_sa.surrogate import EnsembleDecisionTreeSurrogate, Surrogate
+from sklearn.metrics import accuracy_score
 
 '''Algoritmo 1: loresa(x, b, K, U)
 Este está implementado en lore_sa/lore.py, en la función explain_instance.
@@ -110,6 +111,9 @@ class Lore(object):
 
         self.surrogate.train(neighbour, neighb_train_yb, features = feature_names)
 
+        y_surrogate = self.surrogate.predict(neighbour)
+    
+
         # 👉 Si NO se hace merge, NO devolvemos regla ni contrafactuales
         if not merge:
             return {
@@ -134,6 +138,7 @@ class Lore(object):
             'merged_tree': merged_tree,
             'neighborhood_Z': neighbour,
             'neighborhood_Yb': neighb_train_yb,
+            'surrogate_preds': y_surrogate,
         }
 
 
