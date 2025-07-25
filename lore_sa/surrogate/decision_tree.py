@@ -991,7 +991,6 @@ class SuperTree(Surrogate):
     
     def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
                       categorical_features=None, global_mapping=None, used_feats=None):
-
         # Caso base: todos hoja → fusiona clases
         if all(r.is_leaf for r in roots):
             votes = [np.argmax(r.labels) for r in roots]
@@ -1003,7 +1002,7 @@ class SuperTree(Surrogate):
             if level == 0: self.root = super_node
             return super_node
 
-        # Selecciona feature más frecuente
+        # Selecciona feature más frecuente, con criterio de desempate
         feats = [r.feat for r in roots if r.feat is not None]
         if not feats:
             # Sin nodos internos válidos, hoja mayoría
@@ -1015,10 +1014,23 @@ class SuperTree(Surrogate):
             if level == 0: self.root = super_node
             return super_node
 
-        Xf = max(set(feats), key=feats.count)
+        # Contar frecuencia de cada feature
+        from collections import Counter
+        counts = Counter(feats)
+        max_freq = max(counts.values())
+        empatadas = [f for f, c in counts.items() if c == max_freq]
+        # Si hay empate y el feature local (roots[0].feat) está entre las empatadas, prioriza el local
+        if len(empatadas) > 1:
+            if roots[0].feat in empatadas:
+                Xf = roots[0].feat
+            else:
+                Xf = empatadas[0]
+        else:
+            Xf = empatadas[0]
+
         # Umbrales presentes para ese feature
         threshs = sorted(set(r.thresh for r in roots if r.feat == Xf))
-        
+
         if not threshs:
             # Todos nodos hoja o sin splits para este feature, mayoría
             majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
@@ -1029,17 +1041,16 @@ class SuperTree(Surrogate):
             if level == 0: self.root = super_node
             return super_node
 
-        # Sólo el primer threshold para binarizar
+        # Sólo el primer threshold para binarizar (igual para categóricas, ajústalo si tienes lógica específica)
         t = threshs[0]
-        # Binariza ramas (< t y >= t)
         intervals = [(-float('inf'), t), (t, float('inf'))]
         branches = [self.computeBranch(r, intervals, Xf) for r in roots]
 
         children = []
         for j in range(2):
             child_roots = [b[j] for b in branches]
-            # Para la siguiente recursión, quita el threshold ya usado
-            children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names))
+            children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names,
+                                                categorical_features, global_mapping, used_feats))
 
         super_node = self.SuperNode(feat_num=Xf, intervals=[t], children=children, level=level)
         if level == 0: self.root = super_node

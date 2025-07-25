@@ -99,15 +99,21 @@ class Lore(object):
 
         neighbour = self.generator.generate(z, num_instances, self.descriptor, self.encoder)
 
+
         dec_neighbor = self.encoder.decode(neighbour)
 
         neighb_train_X = dec_neighbor[:, :]
 
         neighbour = self.binarize_onehot_features(neighb_train_X, feature_names, categorical_features)
 
+        # print("neighbour binarize_onehot_features")
+        # print(neighbour)
+
+
         neighb_train_y = self.bbox.predict(neighb_train_X)
 
         neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1), categories_global=UNIQUE_LABELS).squeeze()
+
 
         self.surrogate.train(neighbour, neighb_train_yb, features = feature_names)
 
