@@ -106,11 +106,7 @@ class Lore(object):
 
         neighbour = self.binarize_onehot_features(neighb_train_X, feature_names, categorical_features)
 
-        # print("neighbour binarize_onehot_features")
-        # print(neighbour)
-
-
-        neighb_train_y = self.bbox.predict(neighb_train_X)
+        neighb_train_y = self.bbox.predict(neighb_train_X) # ETIQUETAMOS EL VECINDARIO A PARTIR DEL BLACKBOX (RED NEURONAL)
 
         neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1), categories_global=UNIQUE_LABELS).squeeze()
 
@@ -164,7 +160,7 @@ class TabularRandomGeneratorLore(Lore):
 class TabularGeneticGeneratorLore(Lore):
     def __init__(self, bbox: AbstractBBox, dataset: TabularDataset):
         encoder = ColumnTransformerEnc(dataset.descriptor)
-        generator = GeneticGenerator(bbox, dataset, encoder, 0.1)
+        generator = GeneticGenerator(bbox, dataset, encoder, 0.1, random_seed=42)
         surrogate = EnsembleDecisionTreeSurrogate(n_estimators=1)
         super().__init__(bbox, dataset, encoder, generator, surrogate)
 
