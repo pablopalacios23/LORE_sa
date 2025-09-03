@@ -310,8 +310,8 @@ class ClientUtilsMixin:
             # --- Split numérico robusto ---
             elif numeric_features and fname in numeric_features:
                 idx = numeric_features.index(fname)
-                mean = scaler.mean_[idx]
-                std = scaler.scale_[idx]
+                mean = scaler['mean'][idx]
+                std = scaler['std'][idx]
                 # bounds siempre de tamaño len(children)+1 si es correcto
                 bounds = [-np.inf] + list(getattr(node, "intervals", []))
                 for i, child in enumerate(node.children):
@@ -387,8 +387,8 @@ class ClientUtilsMixin:
                     add_node(node.children[1], curr, right_label)
                 elif fname in numeric_features:
                     idx = numeric_features.index(fname)
-                    mean = scaler.mean_[idx]
-                    std = scaler.scale_[idx]
+                    mean = scaler['mean'][idx]
+                    std = scaler['std'][idx]
                     threshold = node.intervals[0]
                     thresh_real = threshold * std + mean if np.isfinite(threshold) else threshold
                     add_node(node.children[0], curr, f"≤ {thresh_real:.2f}")
@@ -572,3 +572,25 @@ class ClientUtilsMixin:
         os.makedirs(folder, exist_ok=True)
         filepath = f"{folder}/{tree_type.lower()}_cliente_{self.client_id}_ronda_{round_number}"
         dot.render(filepath, format="png", cleanup=True)
+
+
+    # Lore tree a escala global antes del merge
+
+    def align_tree_local_to_global(self, root, feature_names, numeric_features,
+                               mu_local, sd_local, mu_global, sd_global):
+        import numpy as np, copy
+        mu_local = np.asarray(mu_local, float); sd_local = np.asarray(sd_local, float)
+        mu_global = np.asarray(mu_global, float); sd_global = np.asarray(sd_global, float)
+        sd_local = np.where(sd_local==0, 1.0, sd_local)
+        sd_global= np.where(sd_global==0, 1.0, sd_global)
+        num_idx = {f:i for i,f in enumerate(numeric_features)}
+
+        def walk(n):
+            if getattr(n, "is_leaf", False): return
+            fname = feature_names[n.feat]
+            if fname in num_idx and hasattr(n, "intervals") and n.intervals:
+                k = num_idx[fname]
+                n.intervals = [ (t*sd_local[k] + mu_local[k] - mu_global[k]) / sd_global[k] for t in n.intervals ]
+            for c in n.children: walk(c)
+
+        r = copy.deepcopy(root); walk(r); return r

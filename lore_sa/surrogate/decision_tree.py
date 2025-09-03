@@ -904,22 +904,22 @@ class SuperTree(Surrogate):
                         self.children.append(self._right_child)
 
         def predict(self, X):
-            def predict_datum(node, x):
+            def walk(node, x):
                 if node.is_leaf:
                     return np.argmax(node.labels)
-                else:
-                    if node.feat is not None:
-                        Xf = node.feat
-                        if node.thresh <= x[Xf] and node._left_child:
-                            next_node = node._left_child
-                        elif node._right_child:
-                            next_node = node._right_child
-                        else:
-                            return np.argmax(node.labels)
-                    else:
-                        next_node = node._left_child
-                    return predict_datum(next_node, x)
-            return np.array([predict_datum(self, el) for el in X])
+                Xf = node.feat
+                if Xf is None:
+                    return walk(node._left_child, x)  # fallback
+
+                # COMPARACIÓN CORRECTA:
+                if x[Xf] <= node.thresh and node._left_child is not None:
+                    return walk(node._left_child, x)
+                elif node._right_child is not None:
+                    return walk(node._right_child, x)
+
+                # si falta algún hijo, cae a la mejor hoja conocida del nodo
+                return np.argmax(node.labels)
+            return np.array([walk(self, xi) for xi in X])
         
         def to_dict(self):
             node_dict = {
@@ -1178,7 +1178,8 @@ class SuperTree(Surrogate):
                     for i, thr in enumerate(node.intervals):
                         if val <= thr:
                             return predict_datum(node.children[i], x)
-                    return np.argmax(node.labels)
+                    # <<–– ANTES devolvías argmax(node.labels) aquí
+                    return predict_datum(node.children[-1], x)  # último hijo si val > último umbral
             return np.array([predict_datum(self, el) for el in X])
         
         def to_dict(self):
