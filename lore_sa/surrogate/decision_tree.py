@@ -556,6 +556,23 @@ class SuperTree(Surrogate):
             level=level
         )
     
+    def _ensure_levels(self, node, lvl=0):
+        if node is None:
+            return
+        # set default level si no existe
+        if not hasattr(node, "level"):
+            node.level = lvl
+        # baja por hijos si existen (soporta binario y n-ario)
+        if hasattr(node, "children") and node.children:
+            for ch in node.children:
+                self._ensure_levels(ch, lvl + 1)
+        else:
+            if hasattr(node, "_left_child") and node._left_child is not None:
+                self._ensure_levels(node._left_child, lvl + 1)
+            if hasattr(node, "_right_child") and node._right_child is not None:
+                self._ensure_levels(node._right_child, lvl + 1)
+
+    
     def prune_redundant_leaves_full(self): # eliminar nodos redundantes (cuando todos los hijos de un nodo predicen lo mismo)
         # print("🔧 Iniciando poda completa de SuperTree")
 
@@ -654,9 +671,9 @@ class SuperTree(Surrogate):
             if hasattr(node, "children"):
                 node.children = [merge_adjacent(child) for child in node.children]
 
-                if not node.intervals or len(node.intervals) < 1 or len(node.children) <= 2:
-                    return node  # Evitar errores
-
+                intervals = getattr(node, "intervals", None)
+                if not intervals or len(intervals) < 1 or len(node.children) <= 2:
+                    return node
                 new_children = []
                 new_intervals = []
                 current_group = []
@@ -922,19 +939,44 @@ class SuperTree(Surrogate):
             return np.array([walk(self, xi) for xi in X])
         
         def to_dict(self):
-            node_dict = {
-                "is_leaf": self.is_leaf,
-                "labels": self.labels.tolist() if self.labels is not None else None,
-                "feat": self.feat,
-                "thresh": self.thresh,
+            out = {
+                "is_leaf": bool(self.is_leaf),
+                "labels": list(self.labels) if self.labels is not None else None,
+                "feat": int(self.feat) if self.feat is not None else None,
+                "thresh": float(self.thresh) if self.thresh is not None else None,
             }
-            if self._left_child or self._right_child:
-                node_dict["left"] = self._left_child.to_dict() if self._left_child else None
-                node_dict["right"] = self._right_child.to_dict() if self._right_child else None
-            elif self.children:
-                node_dict["children"] = [child.to_dict() for child in self.children]
-                node_dict["intervals"] = self.intervals.tolist()
-            return node_dict
+
+            # 1) Hoja
+            if self.is_leaf:
+                out["left"] = None
+                out["right"] = None
+                out["children"] = None
+                out["intervals"] = None
+                return out
+
+            # 2) Árbol BINARIO local (_left_child/_right_child)
+            if getattr(self, "_left_child", None) is not None or getattr(self, "_right_child", None) is not None:
+                out["left"]  = self._left_child.to_dict() if self._left_child else None
+                out["right"] = self._right_child.to_dict() if self._right_child else None
+                out["children"] = None
+                out["intervals"] = None
+                return out
+
+            # 3) Supertree multi-rama (si existiese)
+            if getattr(self, "children", None) is not None:
+                out["children"] = [c.to_dict() if c else None for c in self.children]
+                iv = getattr(self, "intervals", None)
+                out["intervals"] = iv.tolist() if iv is not None else None
+                out["left"] = None
+                out["right"] = None
+                return out
+
+            # 4) Fallback seguro
+            out["left"] = None
+            out["right"] = None
+            out["children"] = None
+            out["intervals"] = None
+            return out
         
         def __repr__(self):
             return str(self.to_dict())
@@ -988,6 +1030,39 @@ class SuperTree(Surrogate):
             )
 
         return createNode(0)
+    
+    def prune_redundant_leaves_local(self, node=None):
+        """
+        Poda local binaria:
+        - Si ambos hijos son hojas y su clase (argmax(labels)) es la misma,
+          colapsa el nodo en una hoja combinando las distribuciones.
+        """
+        if node is None:
+            node = self.root
+
+        def _prune(n):
+            if n is None or n.is_leaf:
+                return n
+
+            n._left_child  = _prune(n._left_child)
+            n._right_child = _prune(n._right_child)
+
+            L, R = n._left_child, n._right_child
+            if (L is not None and R is not None) and L.is_leaf and R.is_leaf:
+                if int(np.argmax(L.labels)) == int(np.argmax(R.labels)):
+                    lab = np.asarray(L.labels, dtype=float) + np.asarray(R.labels, dtype=float)
+                    s = lab.sum()
+                    if s > 0: lab /= s
+                    n.is_leaf = True
+                    n.labels  = lab
+                    n.feat = None; n.thresh = None
+                    n._left_child = None; n._right_child = None
+            return n
+
+        new_root = _prune(node)
+        if node is self.root:
+            self.root = new_root
+        return new_root
     
     def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
                       categorical_features=None, global_mapping=None, used_feats=None):

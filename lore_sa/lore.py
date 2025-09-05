@@ -121,7 +121,7 @@ class Lore(object):
         y_surrogate = self.surrogate.predict(neighbour)
 
         # 1. PCA a 2D para el vecindario
-        pca = PCA(n_components=2, random_state=0)
+        pca = PCA(n_components=num_classes, random_state=0)
         X2 = pca.fit_transform(neighbour)
         y = neighb_train_y
 
