@@ -1,0 +1,5 @@
+dataset,NUM_CLIENTS,client_id,model,accuracy,f1
+pablopalacios23/Diabetes,4,4,MergedTree,0.7124183006535948,0.6432222809800812
+pablopalacios23/Diabetes,4,3,MergedTree,0.6928104575163399,0.5993095187768618
+pablopalacios23/Diabetes,4,2,MergedTree,0.738562091503268,0.6918767507002801
+pablopalacios23/Diabetes,4,1,MergedTree,0.6666666666666666,0.5554509235784135

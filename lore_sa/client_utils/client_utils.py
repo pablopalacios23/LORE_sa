@@ -9,8 +9,11 @@
 
 from graphviz import Digraph
 import numpy as np
-import pandas as pd
 import re, os
+from pathlib import Path
+import pandas as pd
+from filelock import FileLock  # pip install filelock
+import pandas as pd, os
 
 class ClientUtilsMixin:
 
@@ -403,7 +406,7 @@ class ClientUtilsMixin:
                         add_node(child, curr, "?")
         folder_path = f"Ronda_{round_number}/{folder}"
         os.makedirs(folder_path, exist_ok=True)
-        filename = f"{folder_path}/LoreTree_cliente{self.client_id}_Supertree_ronda_{round_number}"
+        filename = f"{folder_path}/MergedTree_cliente{self.client_id}_Lore+Supertree_ronda_{round_number}"
         add_node(root_node)
         dot.render(filename, format="png", cleanup=True)
         return f"{filename}.png"
