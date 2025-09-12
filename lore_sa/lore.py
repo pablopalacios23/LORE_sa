@@ -120,39 +120,41 @@ class Lore(object):
 
         y_surrogate = self.surrogate.predict(neighbour)
 
-        # 1. PCA a 2D para el vecindario
-        pca = PCA(n_components=num_classes, random_state=0)
+        K = len(UNIQUE_LABELS)
+
+        # 1) PCA 2D sobre el vecindario (ya binarizado)
+        pca = PCA(n_components=2, random_state=0)
         X2 = pca.fit_transform(neighbour)
-        y = neighb_train_y
 
-        # 2. Proyectar también la instancia original
-        x_proj = pca.transform([x])
+        # 2) Colores numéricos 0..K-1
+        y_colors = np.asarray(neighb_train_yb, dtype=int)
 
-        # 3. Dibujar scatter
-        plt.figure(figsize=(5,4))
-        scatter = plt.scatter(X2[:,0], X2[:,1], c=y, cmap="coolwarm", s=20, alpha=0.7)
-        plt.colorbar(scatter, label="Clase predicha por bbox")
+        # 3) Proyectar la misma representación de x
+        [zz] = self.encoder.encode([x])
+        xx_dec = self.encoder.decode(np.array([zz]))
+        xx_bin = self.binarize_onehot_features(xx_dec.copy(), feature_names, categorical_features)
+        x_proj = pca.transform(xx_bin)
 
-        # 4. Marcar la instancia explicada
-        plt.scatter(x_proj[0,0], x_proj[0,1], c="k", marker="*", s=120, edgecolors="w", linewidths=1.2)
+        # Elegir colormap según número de clases
+        if K == 2:
+            cmap = "bwr"      # azul vs rojo
+        else:
+            cmap = "tab10"    # colores diferenciados
 
-        plt.title(f"Vecindario + instancia explicada para cliente {client_id}")
-        plt.xlabel("PC1")
-        plt.ylabel("PC2")
-        plt.tight_layout()
+        fig, ax = plt.subplots(figsize=(5,4))
+        sc = ax.scatter(X2[:,0], X2[:,1], c=y_colors, cmap=cmap, s=20, alpha=0.7)
 
-        # # === Guardar en ruta deseada ===
-        # # === Guardar en ruta deseada con round_number y client_id ===
-        # base_dir = r"C:\Users\pablo\OneDrive - Universidad de Castilla-La Mancha\Escritorio\FLOWER_merge_trees"
-        # out_dir = os.path.join(base_dir, f"Ronda_{round_number}", "LoreTree")
-        # os.makedirs(out_dir, exist_ok=True)
+        # Colorbar con etiquetas de clase
+        cbar = fig.colorbar(sc, ax=ax)
+        cbar.set_ticks(np.arange(K))
+        cbar.set_ticklabels(UNIQUE_LABELS)
 
-        # fname = f"neigh_client_{client_id}.png"
-        # save_path = os.path.join(out_dir, fname)
+        # Instancia explicada
+        ax.scatter(x_proj[0,0], x_proj[0,1], c="k", marker="*", s=120, edgecolors="w", linewidths=1.2)
 
-        # plt.savefig(save_path, dpi=150)
-        # plt.close()
-    
+        ax.set(title=f"Vecindario + instancia (cliente {client_id})", xlabel="PC1", ylabel="PC2")
+        fig.tight_layout()
+
 
         # 👉 Si NO se hace merge, NO devolvemos regla ni contrafactuales
         if not merge:

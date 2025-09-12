@@ -408,8 +408,8 @@ class ClientUtilsMixin:
         os.makedirs(folder_path, exist_ok=True)
         filename = f"{folder_path}/MergedTree_cliente{self.client_id}_Lore+Supertree_ronda_{round_number}"
         add_node(root_node)
-        dot.render(filename, format="png", cleanup=True)
-        return f"{filename}.png"
+        dot.render(filename, format="pdf", cleanup=True)
+        return f"{filename}.pdf"
 
     def save_lore_tree_image(self, root_node, round_number, feature_names, numeric_features, scaler, unique_labels, encoder, tree_type="LoreTree", folder="LoreTree"):
         dot = Digraph()
@@ -468,8 +468,8 @@ class ClientUtilsMixin:
         os.makedirs(folder_path, exist_ok=True)
         filename = f"{folder_path}/{tree_type.lower()}_cliente_{self.client_id}_ronda_{round_number}"
         add_node(root_node)
-        dot.render(filename, format="png", cleanup=True)
-        return f"{filename}.png"
+        dot.render(filename, format="pdf", cleanup=True)
+        return f"{filename}.pdf"
     
     
     def _save_local_tree(self, root_node, round_number, feature_names, numeric_features, scaler, unique_labels, encoder, tree_type= "LocalTree"):
@@ -574,7 +574,7 @@ class ClientUtilsMixin:
         folder = f"Ronda_{round_number}/{tree_type}_Cliente_{self.client_id}"
         os.makedirs(folder, exist_ok=True)
         filepath = f"{folder}/{tree_type.lower()}_cliente_{self.client_id}_ronda_{round_number}"
-        dot.render(filepath, format="png", cleanup=True)
+        dot.render(filepath, format="pdf", cleanup=True)
 
 
     # Lore tree a escala global antes del merge

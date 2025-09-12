@@ -920,24 +920,24 @@ class SuperTree(Surrogate):
                     if self._right_child:
                         self.children.append(self._right_child)
 
-        # def predict(self, X):
-        #     print("Usamos este predict de Node")
-        #     def walk(node, x):
-        #         if node.is_leaf:
-        #             return np.argmax(node.labels)
-        #         Xf = node.feat
-        #         if Xf is None:
-        #             return walk(node._left_child, x)  # fallback
+        def predict(self, X):
+            print("Usamos este predict de Node")
+            def walk(node, x):
+                if node.is_leaf:
+                    return np.argmax(node.labels)
+                Xf = node.feat
+                if Xf is None:
+                    return walk(node._left_child, x)  # fallback
 
-        #         # COMPARACIÓN CORRECTA:
-        #         if x[Xf] <= node.thresh and node._left_child is not None:
-        #             return walk(node._left_child, x)
-        #         elif node._right_child is not None:
-        #             return walk(node._right_child, x)
+                # COMPARACIÓN CORRECTA:
+                if x[Xf] <= node.thresh and node._left_child is not None:
+                    return walk(node._left_child, x)
+                elif node._right_child is not None:
+                    return walk(node._right_child, x)
 
-        #         # si falta algún hijo, cae a la mejor hoja conocida del nodo
-        #         return np.argmax(node.labels)
-        #     return np.array([walk(self, xi) for xi in X])
+                # si falta algún hijo, cae a la mejor hoja conocida del nodo
+                return np.argmax(node.labels)
+            return np.array([walk(self, xi) for xi in X])
         
         def to_dict(self):
             out = {

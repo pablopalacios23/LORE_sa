@@ -1,7 +1,3 @@
-dataset,NUM_CLIENTS,client_id,model,accuracy,f1
-pablopalacios23/Diabetes,1,mean,Supertree,0.74609375,0.7151526162790698
-pablopalacios23/Diabetes,1,mean,MergedTree,0.7109375,0.6298871450754215
-pablopalacios23/Diabetes,2,mean,Supertree,0.73046875,0.6875035499837714
-pablopalacios23/Diabetes,2,mean,MergedTree,0.69140625,0.6070434343630048
-pablopalacios23/Diabetes,4,mean,Supertree,0.738562091503268,0.6918767507002801
-pablopalacios23/Diabetes,4,mean,MergedTree,0.7026143790849673,0.6224648685089091
+dataset,NUM_CLIENTS,client_id,model,accuracy,f1,precision,recall
+pablopalacios23/HeartDisease,4,mean,Supertree,0.9166666666666666,0.9160839160839161,0.9285714285714285,0.9166666666666666
+pablopalacios23/HeartDisease,4,mean,MergedTree,0.75,0.7028305028305029,0.7217261904761905,0.75
