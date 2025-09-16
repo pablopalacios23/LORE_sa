@@ -194,36 +194,43 @@ class ClientUtilsMixin:
     def decode_onehot_instance(self, X_row, numeric_features, encoder, scaler, feature_names):
         x_named = pd.Series(X_row, index=feature_names)
         data = {}
-        for i, col in enumerate(numeric_features):
+
+        # ---- numéricas ----
+        for col in numeric_features:
             if col in x_named:
-                val = x_named[col]
+                val = float(x_named[col])
                 idx = numeric_features.index(col)
-                mean = scaler.mean_[idx]
-                std = scaler.scale_[idx]
-                data[col] = val * std + mean
+
+                # Si hay scaler válido, desescala; si no, deja en crudo
+                if scaler is not None and hasattr(scaler, "mean_") and hasattr(scaler, "scale_"):
+                    mean = float(scaler.mean_[idx])
+                    std  = float(scaler.scale_[idx]) if scaler.scale_[idx] != 0 else 1.0
+                    data[col] = val * std + mean
+                elif isinstance(scaler, dict) and "mean" in scaler and "std" in scaler:
+                    mean = float(scaler["mean"][idx])
+                    std  = float(scaler["std"][idx]) if scaler["std"][idx] != 0 else 1.0
+                    data[col] = val * std + mean
+                else:
+                    data[col] = val
             else:
                 data[col] = None
+
+        # ---- categóricas (one-hot) ----
         cat_map = encoder.dataset_descriptor["categorical"]
         for cat in cat_map:
             onehot_names = [c for c in feature_names if c.startswith(cat + "_")]
             val_found = None
             for c in onehot_names:
-                if c in x_named and x_named[c] == 1:
+                if c in x_named and float(x_named[c]) >= 0.5:  # robusto a umbrales
                     val_found = c[len(cat) + 1 :]
                     break
-            if val_found is not None:
-                data[cat] = val_found.strip()
-            else:
-                data[cat] = None
+            data[cat] = val_found.strip() if val_found is not None else None
+
         return pd.Series(data)
 
-    def decode_Xtrain_to_df(self, X_test, numeric_features, encoder, scaler, feature_names):
-        decoded_rows = []
-        for x in X_test:
-            decoded = self.decode_onehot_instance(x, numeric_features, encoder, scaler, feature_names)
-            decoded_rows.append(decoded)
-        df = pd.DataFrame(decoded_rows)
-        return df
+    def decode_Xtrain_to_df(self, X_mat, numeric_features, encoder, scaler, feature_names):
+        rows = [self.decode_onehot_instance(x, numeric_features, encoder, scaler, feature_names) for x in X_mat]
+        return pd.DataFrame(rows)
     
 
 
@@ -236,106 +243,145 @@ class ClientUtilsMixin:
     # 📌 Impresión y conversión de árboles
     # ========================================================
 
-    def print_tree_readable(self, node, feature_names, class_names, numeric_features, scaler, encoder, depth=0):
+    def print_tree_readable(self, node, feature_names, class_names, numeric_features, encoder, depth=0):
         indent = "|   " * depth
+
         if node.is_leaf:
             class_idx = int(np.argmax(node.labels))
             print(f"{indent}|--- class: {class_names[class_idx]}")
             return
-        feat_name = feature_names[node.feat]
 
-        # --- CASO NUMÉRICA ---
+        # Nombre de la feature del nodo
+        try:
+            feat_name = feature_names[node.feat]
+        except Exception:
+            feat_name = f"X_{node.feat}"
+
+        # ---------- CASO NUMÉRICA (en crudo) ----------
         if feat_name in numeric_features:
-            idx = numeric_features.index(feat_name)
-            threshold = node.thresh * scaler.scale_[idx] + scaler.mean_[idx]
-            print(f"{indent}|--- {feat_name} <= {threshold:.2f}")
-            self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, scaler, encoder, depth + 1)
-            print(f"{indent}|--- {feat_name} > {threshold:.2f}")
-            self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, scaler, encoder, depth + 1)
+            thr = node.thresh  # <-- ya en crudo, no desescalar
+            print(f"{indent}|--- {feat_name} <= {thr:.2f}")
+            self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+            print(f"{indent}|--- {feat_name} > {thr:.2f}")
+            self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, encoder, depth + 1)
             return
-        
-        # --- CASO CATEGÓRICA ONE-HOT ---
-        if "=" in feat_name:
 
-            # Ejemplo: occupation= Adm-clerical
-            var, valor = feat_name.split("=")
-            var = var.strip(); valor = valor.strip()
-            # Si threshold == 0.5, OneHot típico: <= 0.5 (no es ese valor), > 0.5 (es ese valor)
-            if node.thresh == 0.5:
-                print(f"{indent}|--- {var} == \"{valor}\"")
-                self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, scaler, encoder, depth + 1)
-                print(f"{indent}|--- {var} != \"{valor}\"")
-                self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, scaler, encoder, depth + 1)
+        # ---------- CASO CATEGÓRICA ONE-HOT ----------
+        # Soporta "var=valor" y "var_valor"
+        if ("=" in feat_name) or ("_" in feat_name):
+            if "=" in feat_name:
+                var, valor = feat_name.split("=", 1)
             else:
-                # Por si hay rarezas (poco frecuente)
-                print(f"{indent}|--- {feat_name} <= {node.thresh:.2f}")
-                self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, scaler, encoder, depth + 1)
-                print(f"{indent}|--- {feat_name} > {node.thresh:.2f}")
-                self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, scaler, encoder, depth + 1)
-            return
-        
-        # --- SI NO ENCAJA ---
-        print(f"{indent}|--- {feat_name} <= {node.thresh:.2f}")
-        self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, scaler, encoder, depth + 1)
-        print(f"{indent}|--- {feat_name} > {node.thresh:.2f}")
-        self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, scaler, encoder, depth + 1)
+                var, valor = feat_name.split("_", 1)
+            var = var.strip()
+            valor = valor.strip()
 
-    def tree_to_str(self, node, feature_names, numeric_features=None, scaler=None, global_mapping=None, unique_labels=None, depth=0):
+            # Umbral típico one-hot: <= 0.5 (NO es ese valor) / > 0.5 (SÍ es ese valor)
+            if abs(node.thresh - 0.5) < 1e-8:
+                # primero rama derecha (= valor), luego izquierda (≠ valor) o viceversa;
+                # aquí mantenemos el orden clásico: izquierda <= 0.5 ⇒ ≠ ; derecha > 0.5 ⇒ =
+                print(f"{indent}|--- {var} == \"{valor}\"")
+                self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+                print(f"{indent}|--- {var} != \"{valor}\"")
+                self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+            else:
+                # raro, pero por si el split no está en 0.5
+                print(f"{indent}|--- {feat_name} <= {node.thresh:.2f}")
+                self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+                print(f"{indent}|--- {feat_name} > {node.thresh:.2f}")
+                self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+            return
+
+        # ---------- CATEGÓRICA NO ONE-HOT (opcional) ----------
+        # Si quieres soportar categóricas no one-hot usando el descriptor del encoder:
+        # original = feat_name.split("=",1)[0].split("_",1)[0].strip()
+        # if original in encoder.dataset_descriptor.get("categorical", {}):
+        #     # Si el árbol guardó índices en node.thresh, se podría mapear a string:
+        #     vals = encoder.dataset_descriptor["categorical"][original]["distinct_values"]
+        #     val_idx = int(getattr(node, "thresh", 0))
+        #     val = vals[val_idx] if 0 <= val_idx < len(vals) else f"desconocido({val_idx})"
+        #     print(f'{indent}|--- {original} == "{val}"')
+        #     self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+        #     print(f'{indent}|--- {original} != "{val}"')
+        #     self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+        #     return
+
+        # ---------- fallback ----------
+        print(f"{indent}|--- {feat_name} <= {node.thresh:.2f}")
+        self.print_tree_readable(node._left_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+        print(f"{indent}|--- {feat_name} > {node.thresh:.2f}")
+        self.print_tree_readable(node._right_child, feature_names, class_names, numeric_features, encoder, depth + 1)
+
+    def tree_to_str(self,node,feature_names,numeric_features=None,scaler=None,global_mapping=None,unique_labels=None,depth=0):
         indent = "  " * depth
         result = ""
+
         if node.is_leaf:
             class_idx = int(np.argmax(node.labels))
             class_label = unique_labels[class_idx] if unique_labels is not None else str(class_idx)
-            result += f'{indent}⮕ Leaf: class = "{class_label.strip()}" | {node.labels}\n'
-        else:
-            fname = feature_names[node.feat]
+            return f'{indent}⮕ Leaf: class = "{class_label.strip()}" | {node.labels}\n'
 
-            # --- Split OneHot ---
-            if "_" in fname:
-                var, val = fname.split("_", 1)
-                var = var.strip()
-                val = val.strip()
-                for i, child in enumerate(node.children):
-                    cond = f'{var} {"≠" if i == 0 else "="} "{val}"'
-                    result += f"{indent}if {cond}\n"
-                    result += self.tree_to_str(child, feature_names, numeric_features, scaler, global_mapping, unique_labels, depth + 1)
+        fname = feature_names[node.feat]
 
-            # --- Split categórico ordinal ---
-            elif global_mapping and fname in global_mapping:
-                vals_cat = global_mapping[fname]
-                for i, child in enumerate(node.children):
+        # --- OneHot (binario): hijos [≠ val, = val]
+        if "_" in fname:
+            var, val = fname.split("_", 1)
+            var = var.strip(); val = val.strip()
+            for i, child in enumerate(node.children):
+                cond = f'{var} {"≠" if i == 0 else "="} "{val}"'
+                result += f"{indent}if {cond}\n"
+                result += self.tree_to_str(child, feature_names, numeric_features, None, global_mapping, unique_labels, depth + 1)
+            return result
+
+        # --- Categórica ordinal con mapping global
+        if global_mapping and fname in global_mapping:
+            vals_cat = global_mapping[fname]
+            for i, child in enumerate(node.children):
+                try:
                     val_idx = node.intervals[i] if hasattr(node, "intervals") and i < len(node.intervals) else int(getattr(node, "thresh", 0))
-                    val = vals_cat[val_idx] if val_idx < len(vals_cat) else f"desconocido({val_idx})"
-                    cond = f'{fname} {"≠" if i == 0 else "="} "{val}"'
-                    result += f"{indent}if {cond}\n"
-                    result += self.tree_to_str(child, feature_names, numeric_features, scaler, global_mapping, unique_labels, depth + 1)
+                except Exception:
+                    val_idx = 0
+                val = vals_cat[val_idx] if 0 <= val_idx < len(vals_cat) else f"desconocido({val_idx})"
+                cond = f'{fname} {"≠" if i == 0 else "="} "{val}"'
+                result += f"{indent}if {cond}\n"
+                result += self.tree_to_str(child, feature_names, numeric_features, None, global_mapping, unique_labels, depth + 1)
+            return result
 
-            # --- Split numérico robusto ---
-            elif numeric_features and fname in numeric_features:
-                idx = numeric_features.index(fname)
-                mean = scaler['mean'][idx]
-                std = scaler['std'][idx]
-                # bounds siempre de tamaño len(children)+1 si es correcto
-                bounds = [-np.inf] + list(getattr(node, "intervals", []))
-                for i, child in enumerate(node.children):
-                    left = bounds[i]
-                    # Si hay suficientes bounds, usa el siguiente, si no, pon np.inf
-                    right = bounds[i + 1] if i + 1 < len(bounds) else np.inf
-                    left_real = left * std + mean if np.isfinite(left) else -np.inf
-                    right_real = right * std + mean if np.isfinite(right) else np.inf
-                    if i == 0:
-                        cond = f"{fname} ≤ {right_real:.2f}"
-                    elif i == len(node.children) - 1:
-                        cond = f"{fname} > {left_real:.2f}"
-                    else:
-                        cond = f"{fname} ∈ ({left_real:.2f}, {right_real:.2f}]"
-                    result += f"{indent}if {cond}\n"
-                    result += self.tree_to_str(child, feature_names, numeric_features, scaler, global_mapping, unique_labels, depth + 1)
-            else:
-                # Por si acaso, caso no detectado
-                for child in node.children:
-                    result += f"{indent}if {fname} ?\n"
-                    result += self.tree_to_str(child, feature_names, numeric_features, scaler, global_mapping, unique_labels, depth + 1)
+        # --- Numérica (en crudo, sin desescalar)
+        if numeric_features and fname in numeric_features:
+            # Construir límites crudos
+            intervals = list(getattr(node, "intervals", []))
+            # Si no hay intervals (p.ej. árbol binario con `thresh`), construiremos [-inf, thresh, +inf]
+            if not intervals and hasattr(node, "thresh"):
+                try:
+                    intervals = [float(node.thresh)]
+                except Exception:
+                    intervals = []
+
+            bounds = [-np.inf] + intervals
+            # Asegurar len(bounds) = len(children)+1
+            while len(bounds) < len(node.children) + 1:
+                bounds.append(np.inf)
+
+            for i, child in enumerate(node.children):
+                left = bounds[i]
+                right = bounds[i + 1]
+                if i == 0:
+                    cond = f"{fname} ≤ {right:.2f}" if np.isfinite(right) else f"{fname} ≤ ?"
+                elif i == len(node.children) - 1:
+                    cond = f"{fname} > {left:.2f}" if np.isfinite(left) else f"{fname} > ?"
+                else:
+                    ltxt = f"{left:.2f}" if np.isfinite(left) else "?"
+                    rtxt = f"{right:.2f}" if np.isfinite(right) else "?"
+                    cond = f"{fname} ∈ ({ltxt}, {rtxt}]"
+                result += f"{indent}if {cond}\n"
+                result += self.tree_to_str(child, feature_names, numeric_features, None, global_mapping, unique_labels, depth + 1)
+            return result
+
+        # --- Desconocido
+        for child in node.children:
+            result += f"{indent}if {fname} ?\n"
+            result += self.tree_to_str(child, feature_names, numeric_features, None, global_mapping, unique_labels, depth + 1)
         return result
     
 
@@ -354,9 +400,14 @@ class ClientUtilsMixin:
     # 📌 Visualización y guardado de árboles (Graphviz)
     # ========================================================
 
-    def save_supertree_plot(self, root_node, round_number, feature_names, class_names, numeric_features, scaler, global_mapping, folder="Supertree"):
+    def save_mergedTree_plot(self,root_node,round_number,feature_names,class_names,numeric_features,scaler, global_mapping,folder="Supertree"):
+        from graphviz import Digraph
+        import numpy as np
+        import os
+
         dot = Digraph()
         node_id = [0]
+
         def add_node(node, parent=None, edge_label=""):
             curr = str(node_id[0])
             node_id[0] += 1
@@ -368,8 +419,8 @@ class ClientUtilsMixin:
                 label = f"class: {class_label}\n{node.labels}"
             else:
                 fname = feature_names[node.feat]
-                if "_" in fname:
-                    var, val = fname.split("_", 1)
+                if "_" in fname:  # OneHot
+                    var, _ = fname.split("_", 1)
                     label = var.strip()
                 else:
                     label = fname
@@ -377,33 +428,41 @@ class ClientUtilsMixin:
             if parent:
                 dot.edge(parent, curr, label=edge_label)
 
-            # Nodos hijos (solo binario)
+            # Hijos (binario)
             if not node.is_leaf:
                 fname = feature_names[node.feat]
-                if "_" in fname: # OneHotEncoder
+
+                # One-hot: hijos [≠ val, = val]
+                if "_" in fname:
                     var, val = fname.split("_", 1)
-                    var = var.strip()
-                    val = val.strip()
-                    left_label = f'≠ "{val}"'
-                    right_label = f'= "{val}"'
-                    add_node(node.children[0], curr, left_label)
-                    add_node(node.children[1], curr, right_label)
+                    var = var.strip(); val = val.strip()
+                    add_node(node.children[0], curr, f'≠ "{val}"')
+                    add_node(node.children[1], curr, f'= "{val}"')
+
+                # Numérica en crudo: usar el threshold tal cual
                 elif fname in numeric_features:
-                    idx = numeric_features.index(fname)
-                    mean = scaler['mean'][idx]
-                    std = scaler['std'][idx]
-                    threshold = node.intervals[0]
-                    thresh_real = threshold * std + mean if np.isfinite(threshold) else threshold
-                    add_node(node.children[0], curr, f"≤ {thresh_real:.2f}")
-                    add_node(node.children[1], curr, f"> {thresh_real:.2f}")
+                    thr = node.intervals[0] if getattr(node, "intervals", None) else node.thresh
+                    thr = float(thr) if np.isfinite(thr) else thr
+                    add_node(node.children[0], curr, f"≤ {thr:.2f}" if np.isfinite(thr) else "≤ ?")
+                    add_node(node.children[1], curr, f"> {thr:.2f}" if np.isfinite(thr) else "> ?")
+
+                # Categórica ordinal con mapeo global: hijos [= val, ≠ val]
                 elif fname in global_mapping:
                     vals_cat = global_mapping[fname]
-                    val = vals_cat[node.intervals[0]] if node.intervals and len(node.intervals) > 0 else "?"
+                    idx = 0
+                    try:
+                        idx = int(node.intervals[0]) if getattr(node, "intervals", None) else int(getattr(node, "thresh", 0))
+                    except Exception:
+                        idx = 0
+                    val = vals_cat[idx] if 0 <= idx < len(vals_cat) else "?"
                     add_node(node.children[0], curr, f'= "{val}"')
                     add_node(node.children[1], curr, f'≠ "{val}"')
+
+                # Desconocido
                 else:
                     for child in node.children:
                         add_node(child, curr, "?")
+
         folder_path = f"Ronda_{round_number}/{folder}"
         os.makedirs(folder_path, exist_ok=True)
         filename = f"{folder_path}/MergedTree_cliente{self.client_id}_Lore+Supertree_ronda_{round_number}"
@@ -411,16 +470,24 @@ class ClientUtilsMixin:
         dot.render(filename, format="pdf", cleanup=True)
         return f"{filename}.pdf"
 
-    def save_lore_tree_image(self, root_node, round_number, feature_names, numeric_features, scaler, unique_labels, encoder, tree_type="LoreTree", folder="LoreTree"):
+    def save_lore_tree_image(self,root_node,round_number,feature_names,numeric_features,unique_labels,encoder,tree_type="LoreTree",folder="LoreTree",):
+        from graphviz import Digraph
+        import os
+        import numpy as np
+        import re
+
         dot = Digraph()
         node_id = [0]
-        def base_name(feat):
-            match = re.match(r"([a-zA-Z0-9\- ]+)", feat)
-            return match.group(1).strip() if match else feat
-        def add_node(node, parent=None, edge_label=""):
-            curr = str(node_id[0])
-            node_id[0] += 1 
-            if node.is_leaf:
+
+        def base_name(feat: str) -> str:
+            m = re.match(r"([a-zA-Z0-9\- ]+)", feat)
+            return m.group(1).strip() if m else feat
+
+        def add_node(node, parent=None, edge_label: str = ""):
+            curr = str(node_id[0]); node_id[0] += 1
+
+            # etiqueta del nodo
+            if getattr(node, "is_leaf", False):
                 class_index = int(np.argmax(node.labels))
                 class_label = unique_labels[class_index]
                 label = f"class: {class_label}\n{node.labels}"
@@ -428,42 +495,61 @@ class ClientUtilsMixin:
                 try:
                     fname = feature_names[node.feat]
                     label = base_name(fname)
-                except:
+                except Exception:
                     label = f"X_{node.feat}"
             dot.node(curr, label)
             if parent:
                 dot.edge(parent, curr, label=edge_label)
 
-            # Árbol binario
-            if not node.is_leaf:
-                fname = feature_names[node.feat]
-                if "_" in fname or "=" in fname:
+            # hijos (binario)
+            if not getattr(node, "is_leaf", False):
+                try:
+                    fname = feature_names[node.feat]
+                except Exception:
+                    fname = f"X_{node.feat}"
+
+                # --- One-hot: "var_valor" o "var=valor"
+                if ("_" in fname) or ("=" in fname):
                     if "_" in fname:
                         var, val = fname.split("_", 1)
                     else:
                         var, val = fname.split("=", 1)
-                    var = var.strip()
-                    val = val.strip()
-                    left_label = f'≠ "{val}"'
+                    var = var.strip(); val = val.strip()
+
+                    # Patrón típico: izquierda (<=0.5) ⇒ ≠, derecha (>0.5) ⇒ =
+                    left_label  = f'≠ "{val}"'
                     right_label = f'= "{val}"'
-                elif base_name(fname) in encoder.dataset_descriptor["categorical"]:
-                    val_idx = int(node.thresh)
+
+                # --- Categórica no one-hot (raro si ya binarizas, pero por si acaso)
+                elif base_name(fname) in encoder.dataset_descriptor.get("categorical", {}):
                     vals_cat = encoder.dataset_descriptor["categorical"][base_name(fname)]["distinct_values"]
-                    val = vals_cat[val_idx] if val_idx < len(vals_cat) else f"desconocido({val_idx})"
-                    left_label = f'= "{val}"'
+                    val_idx = int(getattr(node, "thresh", 0))
+                    val = vals_cat[val_idx] if 0 <= val_idx < len(vals_cat) else f"desconocido({val_idx})"
+                    # mantenemos el mismo convenio binario
+                    left_label  = f'= "{val}"'
                     right_label = f'≠ "{val}"'
+
+                # --- Numérica en crudo
                 elif fname in numeric_features:
-                    idx = numeric_features.index(fname)
-                    mean = scaler.mean_[idx]
-                    std = scaler.scale_[idx]
-                    thresh = node.thresh * std + mean
-                    left_label = f"<= {thresh:.2f}"
-                    right_label = f"> {thresh:.2f}"
+                    thr = float(getattr(node, "thresh", 0.0))
+                    left_label  = f"<= {thr:.2f}"
+                    right_label = f"> {thr:.2f}"
+
                 else:
-                    left_label = "≤ ?"
-                    right_label = "> ?"
-                add_node(node.children[0], curr, left_label)
-                add_node(node.children[1], curr, right_label)
+                    left_label, right_label = "≤ ?", "> ?"
+
+                # Recurse (asumimos binario)
+                if hasattr(node, "children") and node.children and len(node.children) >= 2:
+                    add_node(node.children[0], curr, left_label)
+                    add_node(node.children[1], curr, right_label)
+                else:
+                    # compat con _left_child/_right_child
+                    if getattr(node, "_left_child", None) is not None:
+                        add_node(node._left_child, curr, left_label)
+                    if getattr(node, "_right_child", None) is not None:
+                        add_node(node._right_child, curr, right_label)
+
+        # Guardar PDF
         folder_path = f"Ronda_{round_number}/{folder}"
         os.makedirs(folder_path, exist_ok=True)
         filename = f"{folder_path}/{tree_type.lower()}_cliente_{self.client_id}_ronda_{round_number}"
@@ -472,103 +558,77 @@ class ClientUtilsMixin:
         return f"{filename}.pdf"
     
     
-    def _save_local_tree(self, root_node, round_number, feature_names, numeric_features, scaler, unique_labels, encoder, tree_type= "LocalTree"):
-        dot = Digraph()
-        node_id = [0]
+    def _save_local_tree(
+        self, root_node, round_number, feature_names, numeric_features,
+        scaler=None, unique_labels=None, encoder=None, tree_type="LocalTree"
+    ):
+        dot = Digraph(); node_id = [0]
 
         def base_name(feat):
-            # Extrae solo el nombre de la variable, antes de '_' o '=' o espacios
             match = re.match(r"([a-zA-Z0-9\- ]+)", feat)
             return match.group(1).strip() if match else feat
 
         def add_node(node, parent=None, edge_label=""):
-            curr = str(node_id[0])
-            node_id[0] += 1 
+            curr = str(node_id[0]); node_id[0] += 1
 
-            # Etiqueta del nodo
+            # etiqueta del nodo
             if node.is_leaf:
                 class_index = np.argmax(node.labels)
                 class_label = unique_labels[class_index]
                 label = f"class: {class_label}\n{node.labels}"
             else:
-                try:
-                    fname = feature_names[node.feat]
-                    label = base_name(fname)
-                except:
-                    label = f"X_{node.feat}"
-
+                try:    label = base_name(feature_names[node.feat])
+                except: label = f"X_{node.feat}"
             dot.node(curr, label)
-            if parent:
-                dot.edge(parent, curr, label=edge_label)
+            if parent: dot.edge(parent, curr, label=edge_label)
 
-            # Árbol tipo SuperTree
+            # --- SuperTree (intervalos múltiples) ---
             if hasattr(node, "children") and node.children is not None and hasattr(node, "intervals"):
                 for i, child in enumerate(node.children):
-                    try:
-                        fname = feature_names[node.feat]
-                    except:
-                        fname = f"X_{node.feat}"
-
+                    try:    fname = feature_names[node.feat]
+                    except: fname = f"X_{node.feat}"
                     original_feat = base_name(fname)
+
                     if original_feat in encoder.dataset_descriptor["categorical"]:
-                        val_idx = node.intervals[i] if i == 0 else node.intervals[i - 1]
+                        val_idx = node.intervals[i] if i == 0 else node.intervals[i-1]
                         val_idx = int(val_idx)
                         vals_cat = encoder.dataset_descriptor["categorical"][original_feat]["distinct_values"]
                         val = vals_cat[val_idx] if val_idx < len(vals_cat) else f"desconocido({val_idx})"
                         edge = f'= "{val}"' if i == 0 else f'≠ "{val}"'
                     elif original_feat in numeric_features:
-                        idx = numeric_features.index(original_feat)
-                        mean = scaler.mean_[idx]
-                        std = scaler.scale_[idx]
-                        val = node.intervals[i] if i == 0 else node.intervals[i - 1]
-                        val = val * std + mean
+                        # Árbol en crudo ⇒ umbral en escala cruda (NO desescalar)
+                        val = node.intervals[i] if i == 0 else node.intervals[i-1]
                         edge = f"<= {val:.2f}" if i == 0 else f"> {val:.2f}"
                     else:
                         edge = "?"
 
                     add_node(child, curr, edge)
 
+            # --- Árbol binario (left/right) ---
             elif hasattr(node, "_left_child") or hasattr(node, "_right_child"):
-                try:
-                    fname = feature_names[node.feat]
-                except:
-                    fname = f"X_{node.feat}"
+                try:    fname = feature_names[node.feat]
+                except: fname = f"X_{node.feat}"
 
-                # Si es OneHot
-                if "_" in fname:
+                if "_" in fname:  # one-hot
                     var, val = fname.split("_", 1)
-                    var = var.strip()
-                    val = val.strip()
-                    # La split es: Si sex_ Male <= 0.5  (NO es Male)
-                    #              Si sex_ Male > 0.5   (SÍ es Male)
-                    left_label = f'≠ "{val}"'   # <= 0.5 → no es ese valor
-                    right_label = f'= "{val}"'  # > 0.5  → sí es ese valor
+                    left_label  = f'≠ "{val.strip()}"'   # <= 0.5
+                    right_label = f'= "{val.strip()}"'   # > 0.5
                 else:
                     original_feat = base_name(fname)
-
                     if original_feat in encoder.dataset_descriptor["categorical"]:
                         val_idx = int(node.thresh)
                         vals_cat = encoder.dataset_descriptor["categorical"][original_feat]["distinct_values"]
                         val = vals_cat[val_idx] if val_idx < len(vals_cat) else f"desconocido({val_idx})"
-                        left_label = f'= "{val}"'
-                        right_label = f'≠ "{val}"'
-
+                        left_label, right_label = f'= "{val}"', f'≠ "{val}"'
                     elif fname in numeric_features:
-                        idx = numeric_features.index(fname)
-                        mean = scaler.mean_[idx]
-                        std = scaler.scale_[idx]
-                        thresh = node.thresh * std + mean
-                        left_label = f"<= {thresh:.2f}"
-                        right_label = f"> {thresh:.2f}"
-                        
+                        # Árbol en crudo ⇒ umbral en escala cruda (NO desescalar)
+                        thresh = node.thresh
+                        left_label, right_label = f"<= {thresh:.2f}", f"> {thresh:.2f}"
                     else:
-                        left_label = "≤ ?"
-                        right_label = "> ?"
+                        left_label, right_label = "≤ ?", "> ?"
 
-                if node._left_child:
-                    add_node(node._left_child, curr, left_label)
-                if node._right_child:
-                    add_node(node._right_child, curr, right_label)
+                if node._left_child:  add_node(node._left_child,  curr, left_label)
+                if node._right_child: add_node(node._right_child, curr, right_label)
 
         add_node(root_node)
         folder = f"Ronda_{round_number}/{tree_type}_Cliente_{self.client_id}"

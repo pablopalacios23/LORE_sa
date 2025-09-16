@@ -1,5 +1,0 @@
-dataset,NUM_CLIENTS,client_id,model,accuracy,f1,precision,recall
-pablopalacios23/HeartDisease,4,3,MergedTree,0.5,0.3333333333333333,0.25,0.5
-pablopalacios23/HeartDisease,4,4,MergedTree,0.9166666666666666,0.9160839160839161,0.9285714285714285,0.9166666666666666
-pablopalacios23/HeartDisease,4,1,MergedTree,0.75,0.7333333333333334,0.8333333333333334,0.75
-pablopalacios23/HeartDisease,4,2,MergedTree,0.8333333333333334,0.8285714285714286,0.875,0.8333333333333334

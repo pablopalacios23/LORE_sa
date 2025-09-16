@@ -111,6 +111,7 @@ class Lore(object):
 
         neighbour = self.binarize_onehot_features(neighb_train_X, feature_names, categorical_features)
 
+
         neighb_train_y = self.bbox.predict(neighb_train_X) # ETIQUETAMOS EL VECINDARIO A PARTIR DEL BLACKBOX (RED NEURONAL)
 
         neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1), categories_global=UNIQUE_LABELS).squeeze()
