@@ -657,3 +657,51 @@ class ClientUtilsMixin:
             for c in n.children: walk(c)
 
         r = copy.deepcopy(root); walk(r); return r
+    
+
+    # ---- Utils de estructura del árbol (SuperTree/LORE) ----
+    def is_leaf(self, node):
+        # Ajusta estos nombres si tu clase usa otros atributos
+        if node is None:
+            return True
+        if hasattr(node, "is_leaf"):
+            return bool(node.is_leaf)
+        # Fallback: sin hijos (ni left/right ni children) => hoja
+        has_left  = hasattr(node, "left")  and node.left  is not None
+        has_right = hasattr(node, "right") and node.right is not None
+        has_children = hasattr(node, "children") and node.children
+        return not (has_left or has_right or has_children)
+
+    def tree_depth_edges(self, node):
+        """Profundidad (en aristas). Una hoja tiene profundidad 0."""
+        if node is None or self.is_leaf(node):
+            return 0
+        # Soporta binario (left/right) o N-ario (children)
+        if hasattr(node, "children") and node.children:
+            return 1 + max(self.tree_depth_edges(ch) for ch in node.children)
+        else:
+            return 1 + max(self.tree_depth_edges(getattr(node, "left", None)),
+                        self.tree_depth_edges(getattr(node, "right", None)))
+
+    def count_nodes(self, node):
+        if node is None:
+            return 0
+        if self.is_leaf(node):
+            return 1
+        total = 1
+        if hasattr(node, "children") and node.children:
+            total += sum(self.count_nodes(ch) for ch in node.children)
+        else:
+            total += self.count_nodes(getattr(node, "left", None))
+            total += self.count_nodes(getattr(node, "right", None))
+        return total
+
+    def count_leaves(self, node):
+        if node is None:
+            return 0
+        if self.is_leaf(node):
+            return 1
+        if hasattr(node, "children") and node.children:
+            return sum(self.count_leaves(ch) for ch in node.children)
+        else:
+            return self.count_leaves(getattr(node, "left", None)) + self.count_leaves(getattr(node, "right", None))
