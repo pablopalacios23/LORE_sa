@@ -705,3 +705,6 @@ class ClientUtilsMixin:
             return sum(self.count_leaves(ch) for ch in node.children)
         else:
             return self.count_leaves(getattr(node, "left", None)) + self.count_leaves(getattr(node, "right", None))
+        
+
+    

@@ -921,7 +921,7 @@ class SuperTree(Surrogate):
                         self.children.append(self._right_child)
 
         def predict(self, X):
-            print("Usamos este predict de Node")
+            # print("Usamos este predict de Node")
             def walk(node, x):
                 if node.is_leaf:
                     return np.argmax(node.labels)
@@ -1067,6 +1067,7 @@ class SuperTree(Surrogate):
     
     def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
                       categorical_features=None, global_mapping=None, used_feats=None):
+
         # Caso base: todos hoja → fusiona clases
         if all(r.is_leaf for r in roots):
             votes = [np.argmax(r.labels) for r in roots]
