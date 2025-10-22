@@ -1,3 +1,0 @@
-dataset,NUM_CLIENTS,client_id,model,accuracy,f1,precision,recall
-pablopalacios23/HeartDisease,4,mean,Supertree,0.9166666666666666,0.9160839160839161,0.9285714285714285,0.9166666666666666
-pablopalacios23/HeartDisease,4,mean,MergedTree,0.75,0.7028305028305029,0.7217261904761905,0.75

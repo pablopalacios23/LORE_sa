@@ -7,6 +7,7 @@
 #     class FlowerClient(NumPyClient, ClientUtilsMixin)
 # ============================================================
 
+import csv
 from graphviz import Digraph
 import numpy as np
 import re, os
@@ -706,5 +707,42 @@ class ClientUtilsMixin:
         else:
             return self.count_leaves(getattr(node, "left", None)) + self.count_leaves(getattr(node, "right", None))
         
+    @staticmethod
+    def _to_float(x):
+        import numpy as np
+        return float(x) if isinstance(x, (int, float, np.floating)) else None
+
+    def _client_csv_path(self, filename):
+        base = Path("results")
+        base.mkdir(parents=True, exist_ok=True)
+        return base / f"metrics_{filename}_cliente_{int(self.client_id)}.csv"
+
+    def _append_client_csv(self, row: dict, filename):
+        path = self._client_csv_path(filename)
+        write_header = not path.exists()
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=list(row.keys()))
+            if write_header:
+                w.writeheader()
+            w.writerow(row)
+
+    def _has_rule(self, rule):
+        # True SOLO si hay regla con al menos una condición
+        if rule is None:
+            return False
+        if isinstance(rule, (list, tuple, set)):
+            return len(rule) > 0
+        if isinstance(rule, str):
+            return rule.strip() != ""  # por si llega como string
+        if isinstance(rule, dict):
+            # p.ej. {"Yes": [...]} u otras estructuras
+            return any(bool(v) for v in rule.values())
+        return bool(rule)
+    
+    def _to_num(self, x):
+        try:
+            return float(x)
+        except:
+            return 0.0
 
     
