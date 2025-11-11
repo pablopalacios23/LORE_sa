@@ -121,40 +121,40 @@ class Lore(object):
 
         y_surrogate = self.surrogate.predict(neighbour)
 
-        K = len(UNIQUE_LABELS)
+        # K = len(UNIQUE_LABELS)
 
-        # 1) PCA 2D sobre el vecindario (ya binarizado)
-        pca = PCA(n_components=2, random_state=0)
-        X2 = pca.fit_transform(neighbour)
+        # # 1) PCA 2D sobre el vecindario (ya binarizado)
+        # pca = PCA(n_components=2, random_state=0)
+        # X2 = pca.fit_transform(neighbour)
 
-        # 2) Colores numéricos 0..K-1
-        y_colors = np.asarray(neighb_train_yb, dtype=int)
+        # # 2) Colores numéricos 0..K-1
+        # y_colors = np.asarray(neighb_train_yb, dtype=int)
 
-        # 3) Proyectar la misma representación de x
-        [zz] = self.encoder.encode([x])
-        xx_dec = self.encoder.decode(np.array([zz]))
-        xx_bin = self.binarize_onehot_features(xx_dec.copy(), feature_names, categorical_features)
-        x_proj = pca.transform(xx_bin)
+        # # 3) Proyectar la misma representación de x
+        # [zz] = self.encoder.encode([x])
+        # xx_dec = self.encoder.decode(np.array([zz]))
+        # xx_bin = self.binarize_onehot_features(xx_dec.copy(), feature_names, categorical_features)
+        # x_proj = pca.transform(xx_bin)
 
-        # Elegir colormap según número de clases
-        if K == 2:
-            cmap = "bwr"      # azul vs rojo
-        else:
-            cmap = "tab10"    # colores diferenciados
+        # # Elegir colormap según número de clases
+        # if K == 2:
+        #     cmap = "bwr"      # azul vs rojo
+        # else:
+        #     cmap = "tab10"    # colores diferenciados
 
-        fig, ax = plt.subplots(figsize=(5,4))
-        sc = ax.scatter(X2[:,0], X2[:,1], c=y_colors, cmap=cmap, s=20, alpha=0.7)
+        # fig, ax = plt.subplots(figsize=(5,4))
+        # sc = ax.scatter(X2[:,0], X2[:,1], c=y_colors, cmap=cmap, s=20, alpha=0.7)
 
-        # Colorbar con etiquetas de clase
-        cbar = fig.colorbar(sc, ax=ax)
-        cbar.set_ticks(np.arange(K))
-        cbar.set_ticklabels(UNIQUE_LABELS)
+        # # Colorbar con etiquetas de clase
+        # cbar = fig.colorbar(sc, ax=ax)
+        # cbar.set_ticks(np.arange(K))
+        # cbar.set_ticklabels(UNIQUE_LABELS)
 
-        # Instancia explicada
-        ax.scatter(x_proj[0,0], x_proj[0,1], c="k", marker="*", s=120, edgecolors="w", linewidths=1.2)
+        # # Instancia explicada
+        # ax.scatter(x_proj[0,0], x_proj[0,1], c="k", marker="*", s=120, edgecolors="w", linewidths=1.2)
 
-        ax.set(title=f"Vecindario + instancia (cliente {client_id})", xlabel="PC1", ylabel="PC2")
-        fig.tight_layout()
+        # ax.set(title=f"Vecindario + instancia (cliente {client_id})", xlabel="PC1", ylabel="PC2")
+        # fig.tight_layout()
 
 
         # 👉 Si NO se hace merge, NO devolvemos regla ni contrafactuales
