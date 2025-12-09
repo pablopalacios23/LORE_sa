@@ -637,6 +637,163 @@ class ClientUtilsMixin:
         filepath = f"{folder}/{tree_type.lower()}_cliente_{self.client_id}_ronda_{round_number}"
         dot.render(filepath, format="pdf", cleanup=True)
 
+    def _save_local_local_tree(
+        self, root_node, round_number, feature_names, numeric_features,
+        scaler=None, unique_labels=None, encoder=None, tree_type="neighborhood_local_Tree"
+    ):
+        dot = Digraph(); node_id = [0]
+
+        def base_name(feat):
+            match = re.match(r"([a-zA-Z0-9\- ]+)", feat)
+            return match.group(1).strip() if match else feat
+
+        def add_node(node, parent=None, edge_label=""):
+            curr = str(node_id[0]); node_id[0] += 1
+
+            # etiqueta del nodo
+            if node.is_leaf:
+                class_index = np.argmax(node.labels)
+                class_label = unique_labels[class_index]
+                label = f"class: {class_label}\n{node.labels}"
+            else:
+                try:    label = base_name(feature_names[node.feat])
+                except: label = f"X_{node.feat}"
+            dot.node(curr, label)
+            if parent: dot.edge(parent, curr, label=edge_label)
+
+            # --- SuperTree (intervalos múltiples) ---
+            if hasattr(node, "children") and node.children is not None and hasattr(node, "intervals"):
+                for i, child in enumerate(node.children):
+                    try:    fname = feature_names[node.feat]
+                    except: fname = f"X_{node.feat}"
+                    original_feat = base_name(fname)
+
+                    if original_feat in encoder.dataset_descriptor["categorical"]:
+                        val_idx = node.intervals[i] if i == 0 else node.intervals[i-1]
+                        val_idx = int(val_idx)
+                        vals_cat = encoder.dataset_descriptor["categorical"][original_feat]["distinct_values"]
+                        val = vals_cat[val_idx] if val_idx < len(vals_cat) else f"desconocido({val_idx})"
+                        edge = f'= "{val}"' if i == 0 else f'≠ "{val}"'
+                    elif original_feat in numeric_features:
+                        # Árbol en crudo ⇒ umbral en escala cruda (NO desescalar)
+                        val = node.intervals[i] if i == 0 else node.intervals[i-1]
+                        edge = f"<= {val:.2f}" if i == 0 else f"> {val:.2f}"
+                    else:
+                        edge = "?"
+
+                    add_node(child, curr, edge)
+
+            # --- Árbol binario (left/right) ---
+            elif hasattr(node, "_left_child") or hasattr(node, "_right_child"):
+                try:    fname = feature_names[node.feat]
+                except: fname = f"X_{node.feat}"
+
+                if "_" in fname:  # one-hot
+                    var, val = fname.split("_", 1)
+                    left_label  = f'≠ "{val.strip()}"'   # <= 0.5
+                    right_label = f'= "{val.strip()}"'   # > 0.5
+                else:
+                    original_feat = base_name(fname)
+                    if original_feat in encoder.dataset_descriptor["categorical"]:
+                        val_idx = int(node.thresh)
+                        vals_cat = encoder.dataset_descriptor["categorical"][original_feat]["distinct_values"]
+                        val = vals_cat[val_idx] if val_idx < len(vals_cat) else f"desconocido({val_idx})"
+                        left_label, right_label = f'= "{val}"', f'≠ "{val}"'
+                    elif fname in numeric_features:
+                        # Árbol en crudo ⇒ umbral en escala cruda (NO desescalar)
+                        thresh = node.thresh
+                        left_label, right_label = f"<= {thresh:.2f}", f"> {thresh:.2f}"
+                    else:
+                        left_label, right_label = "≤ ?", "> ?"
+
+                if node._left_child:  add_node(node._left_child,  curr, left_label)
+                if node._right_child: add_node(node._right_child, curr, right_label)
+
+        add_node(root_node)
+        folder = f"Ronda_{round_number}/{tree_type}_Cliente_{self.client_id}"
+        os.makedirs(folder, exist_ok=True)
+        filepath = f"{folder}/{tree_type.lower()}_cliente_{self.client_id}_ronda_{round_number}"
+        dot.render(filepath, format="pdf", cleanup=True)
+
+    
+    def _save_local_super_tree(
+        self, root_node, round_number, feature_names, numeric_features,
+        scaler=None, unique_labels=None, encoder=None, tree_type="neighborhood_super_Tree"
+    ):
+        dot = Digraph(); node_id = [0]
+
+        def base_name(feat):
+            match = re.match(r"([a-zA-Z0-9\- ]+)", feat)
+            return match.group(1).strip() if match else feat
+
+        def add_node(node, parent=None, edge_label=""):
+            curr = str(node_id[0]); node_id[0] += 1
+
+            # etiqueta del nodo
+            if node.is_leaf:
+                class_index = np.argmax(node.labels)
+                class_label = unique_labels[class_index]
+                label = f"class: {class_label}\n{node.labels}"
+            else:
+                try:    label = base_name(feature_names[node.feat])
+                except: label = f"X_{node.feat}"
+            dot.node(curr, label)
+            if parent: dot.edge(parent, curr, label=edge_label)
+
+            # --- SuperTree (intervalos múltiples) ---
+            if hasattr(node, "children") and node.children is not None and hasattr(node, "intervals"):
+                for i, child in enumerate(node.children):
+                    try:    fname = feature_names[node.feat]
+                    except: fname = f"X_{node.feat}"
+                    original_feat = base_name(fname)
+
+                    if original_feat in encoder.dataset_descriptor["categorical"]:
+                        val_idx = node.intervals[i] if i == 0 else node.intervals[i-1]
+                        val_idx = int(val_idx)
+                        vals_cat = encoder.dataset_descriptor["categorical"][original_feat]["distinct_values"]
+                        val = vals_cat[val_idx] if val_idx < len(vals_cat) else f"desconocido({val_idx})"
+                        edge = f'= "{val}"' if i == 0 else f'≠ "{val}"'
+                    elif original_feat in numeric_features:
+                        # Árbol en crudo ⇒ umbral en escala cruda (NO desescalar)
+                        val = node.intervals[i] if i == 0 else node.intervals[i-1]
+                        edge = f"<= {val:.2f}" if i == 0 else f"> {val:.2f}"
+                    else:
+                        edge = "?"
+
+                    add_node(child, curr, edge)
+
+            # --- Árbol binario (left/right) ---
+            elif hasattr(node, "_left_child") or hasattr(node, "_right_child"):
+                try:    fname = feature_names[node.feat]
+                except: fname = f"X_{node.feat}"
+
+                if "_" in fname:  # one-hot
+                    var, val = fname.split("_", 1)
+                    left_label  = f'≠ "{val.strip()}"'   # <= 0.5
+                    right_label = f'= "{val.strip()}"'   # > 0.5
+                else:
+                    original_feat = base_name(fname)
+                    if original_feat in encoder.dataset_descriptor["categorical"]:
+                        val_idx = int(node.thresh)
+                        vals_cat = encoder.dataset_descriptor["categorical"][original_feat]["distinct_values"]
+                        val = vals_cat[val_idx] if val_idx < len(vals_cat) else f"desconocido({val_idx})"
+                        left_label, right_label = f'= "{val}"', f'≠ "{val}"'
+                    elif fname in numeric_features:
+                        # Árbol en crudo ⇒ umbral en escala cruda (NO desescalar)
+                        thresh = node.thresh
+                        left_label, right_label = f"<= {thresh:.2f}", f"> {thresh:.2f}"
+                    else:
+                        left_label, right_label = "≤ ?", "> ?"
+
+                if node._left_child:  add_node(node._left_child,  curr, left_label)
+                if node._right_child: add_node(node._right_child, curr, right_label)
+
+        add_node(root_node)
+        folder = f"Ronda_{round_number}/{tree_type}_Cliente_{self.client_id}"
+        os.makedirs(folder, exist_ok=True)
+        filepath = f"{folder}/{tree_type.lower()}_cliente_{self.client_id}_ronda_{round_number}"
+        dot.render(filepath, format="pdf", cleanup=True)
+
 
     # Lore tree a escala global antes del merge
 

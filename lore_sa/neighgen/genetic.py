@@ -326,8 +326,8 @@ class GeneticGenerator(LegacyGeneticGenerator):
     Random Generator creates neighbor instances by generating random values starting from an input instance and
     pruning the generation around a fitness function based on proximity to the instance to explain
     """
-    def __init__(self, bbox=None, dataset=None, encoder=None, ocr=0.2,
-                 alpha1=0.5, alpha2=0.5, metric=neuclidean, ngen=100, mutpb=0.2, cxpb=0.5,
+    def __init__(self, bbox=None, dataset=None, encoder=None, ocr=0.1,
+                 alpha1=0.5, alpha2=0.5, metric=neuclidean, ngen=80, mutpb=0.2, cxpb=0.5,
                  tournsize=3, halloffame_ratio=0.1, random_seed=None):
         """
 
@@ -535,46 +535,57 @@ class GeneticGenerator(LegacyGeneticGenerator):
 
 
     def population_fitness_equal(self, z):
-        """
-        This fitness function evaluate the feature_similarity and the target_similarity of a population against a given
-        instance z. The two similarities are computed using optimezed functions of `numpy` and `scipy` libraries.
-        This improves the performance of the algorithm.
-        """
+        # Configura la métrica una sola vez
+        if isinstance(self.metric, numbers.Number):
+            self.metric = neuclidean
+
+        # Decodifica x y calcula su predicción UNA VEZ
+        x_decoded = self.encoder.decode(z.reshape(1, -1))
+        y_target = self.bbox.predict(x_decoded)
+
         def wrapper(population):
-            if isinstance(self.metric, numbers.Number):
-                self.metric = neuclidean
-            feature_similarity_score = 1.0 - cdist(z.reshape(1, -1), population, metric=self.metric).ravel()
+            # 1) similarity de características (ya vectorizada)
+            feature_similarity_score = 1.0 - cdist(
+                z.reshape(1, -1), population, metric=self.metric
+            ).ravel()
             feature_similarity = sigmoid(feature_similarity_score)
 
-            x = self.encoder.decode(z.reshape(1, -1))
-            pop = self.encoder.decode(np.array(population))
-            pop_y = self.bbox.predict(pop)
-            y = self.bbox.predict(x)
+            # 2) decodifica la población y predice en batch
+            pop_decoded = self.encoder.decode(np.array(population))
+            pop_y = self.bbox.predict(pop_decoded)
 
-            target_similarity = np.array([sigmoid(1.0 - hamming(y, [y1])) for y1 in pop_y])
-
+            # 3) similarity de clase (ya usando y_target fijo)
+            target_similarity = np.array(
+                [sigmoid(1.0 - hamming(y_target, [y1])) for y1 in pop_y]
+            )
 
             evaluation = self.alpha1 * feature_similarity + self.alpha2 * target_similarity
-
             return evaluation
+
         return wrapper
 
+
     def population_fitness_notequal(self, z):
+        if isinstance(self.metric, numbers.Number):
+            self.metric = neuclidean
+
+        x_decoded = self.encoder.decode(z.reshape(1, -1))
+        y_target = self.bbox.predict(x_decoded)
+
         def wrapper(population):
-            if isinstance(self.metric, numbers.Number):
-                self.metric = neuclidean
-            feature_similarity_score = 1.0 - cdist(z.reshape(1, -1), population, metric=self.metric).ravel()
+            feature_similarity_score = 1.0 - cdist(
+                z.reshape(1, -1), population, metric=self.metric
+            ).ravel()
             feature_similarity = sigmoid(feature_similarity_score)
 
-            x = self.encoder.decode(z.reshape(1, -1))
-            pop = self.encoder.decode(np.array(population))
-            pop_y = self.bbox.predict(pop)
-            y = self.bbox.predict(x)
+            pop_decoded = self.encoder.decode(np.array(population))
+            pop_y = self.bbox.predict(pop_decoded)
 
-            target_similarity = np.array([sigmoid(hamming(y, [y1])) for y1 in pop_y])
-
+            target_similarity = np.array(
+                [sigmoid(hamming(y_target, [y1])) for y1 in pop_y]
+            )
 
             evaluation = self.alpha1 * feature_similarity + self.alpha2 * target_similarity
-
             return evaluation
+
         return wrapper

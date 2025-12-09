@@ -573,31 +573,91 @@ class SuperTree(Surrogate):
                 self._ensure_levels(node._right_child, lvl + 1)
 
     
-    def prune_redundant_leaves_full(self): # eliminar nodos redundantes (cuando todos los hijos de un nodo predicen lo mismo)
-        # print("🔧 Iniciando poda completa de SuperTree")
+    def prune_redundant_leaves_full(self):
+        """
+        Poda estructural del SuperTree:
+        1) Si todos los hijos son hojas de la misma clase -> se colapsa a una hoja.
+        2) Si todas las hojas bajo un nodo son de la misma clase -> se colapsa a una hoja.
+        3) Elimina hijos duplicados (mismas labels).
+        """
+
+        import numpy as np
+
+        def collect_leaf_labels(node, out):
+            """Acumula los vectores de labels de todas las hojas bajo 'node'."""
+            if node.is_leaf:
+                if node.labels is not None:
+                    out.append(np.asarray(node.labels, dtype=float))
+            else:
+                if node.children:
+                    for ch in node.children:
+                        collect_leaf_labels(ch, out)
+
+        def all_leaves_same_class(node):
+            """Devuelve la clase común de todas las hojas o None si no son homogéneas."""
+            if node.is_leaf:
+                if node.labels is None:
+                    return None
+                return int(np.argmax(node.labels))
+
+            if not node.children:
+                return None
+
+            classes = []
+            for ch in node.children:
+                c = all_leaves_same_class(ch)
+                if c is None:
+                    return None
+                classes.append(c)
+
+            if not classes:
+                return None
+
+            return classes[0] if all(c == classes[0] for c in classes) else None
 
         def prune(node):
             if node.is_leaf or not node.children:
                 return node
 
-            node.children = [prune(child) for child in node.children]
+            # Poda recursiva primero en hijos
+            node.children = [prune(ch) for ch in node.children]
 
-            # print(f"👀 Evaluando poda en nodo nivel {node.level}")
-            # for idx, child in enumerate(node.children):
-            #     print(f"   └─ Hijo {idx}: predicción={np.argmax(child.labels)}, labels={child.labels}")
+            # ---------------- Caso 1: todos los hijos son hojas de la misma clase ----------------
+            if all(ch.is_leaf for ch in node.children):
+                labels_list = [ch.labels for ch in node.children if ch.labels is not None]
+                if labels_list:
+                    preds = [int(np.argmax(l)) for l in labels_list]
+                    if all(p == preds[0] for p in preds):
+                        combined = np.sum(labels_list, axis=0)
+                        return self.SuperNode(is_leaf=True, labels=combined, level=node.level)
 
-            if all(child.is_leaf for child in node.children):
-                predictions = [np.argmax(child.labels) for child in node.children]
-                if all(p == predictions[0] for p in predictions):
-                    # print(f"✅ 🌿 Poda realizada en nivel {node.level}: clase común = {predictions[0]}")
-                    combined = np.sum([child.labels for child in node.children], axis=0)
+            # ---------------- Caso 2: todo el subárbol es homogéneo ----------------
+            same_class = all_leaves_same_class(node)
+            if same_class is not None:
+                labels_list = []
+                collect_leaf_labels(node, labels_list)
+                if labels_list:
+                    combined = np.sum(labels_list, axis=0)
                     return self.SuperNode(is_leaf=True, labels=combined, level=node.level)
+
+            # ---------------- Caso 3: eliminar hijos duplicados ----------------
+            unique_children = []
+            seen = set()
+            for ch in node.children:
+                if ch.labels is None:
+                    # si no tiene labels, no lo colapsamos por firma, lo dejamos
+                    unique_children.append(ch)
+                    continue
+                sig = tuple(np.round(np.asarray(ch.labels, dtype=float), 3))
+                if sig not in seen:
+                    seen.add(sig)
+                    unique_children.append(ch)
+            node.children = unique_children
 
             return node
 
         if self.root:
             self.root = prune(self.root)
-        # print("✅ Poda completa finalizada")
 
     # def merge_equal_class_leaves(self): # PARA EL ALGORITMO VIEJO EL QUE PERMITE MULTINARIO
     #     # print("🔁 Buscando ramas adyacentes que puedan fusionarse")
@@ -1010,24 +1070,39 @@ class SuperTree(Surrogate):
         nodes = dt.tree_.__getstate__()['nodes']
         values = dt.tree_.__getstate__()['values']
 
+        # clases locales del árbol (ya codificadas como 0,1,... globales)
+        local_classes = dt.classes_.astype(int)
+
         def createNode(idx):
             line = nodes[idx]
+
+            # raw_pred tiene tamaño len(local_classes)
             raw_pred = values[idx][0]
-            full_pred = np.zeros(num_classes)
-            copy_len = min(len(raw_pred), num_classes)
-            full_pred[:copy_len] = raw_pred[:copy_len]
+
+            # vector de probs/conteos en espacio GLOBAL (0..num_classes-1)
+            full_pred = np.zeros(num_classes, dtype=float)
+            for local_pos, global_cls in enumerate(local_classes):
+                if 0 <= global_cls < num_classes:
+                    full_pred[global_cls] = raw_pred[local_pos]
 
             if line[0] == -1:  # hoja
-                return self.Node(feat_num=None, thresh=None, labels=full_pred, is_leaf=True)
+                return self.Node(
+                    feat_num=None,
+                    thresh=None,
+                    labels=full_pred,
+                    is_leaf=True,
+                )
+
             LC = createNode(line[0])
             RC = createNode(line[1])
+
             return self.Node(
                 feat_num=feature_used[line[2]],
                 thresh=line[3],
                 labels=full_pred,
                 is_leaf=False,
                 left_child=LC,
-                right_child=RC
+                right_child=RC,
             )
 
         return createNode(0)
@@ -1065,9 +1140,50 @@ class SuperTree(Surrogate):
             self.root = new_root
         return new_root
     
-    def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
-                      categorical_features=None, global_mapping=None, used_feats=None):
+    def _clone_lore_to_super(self, node, level=0):
+        if node is None:
+            return None
 
+        if node.is_leaf:
+            return self.SuperNode(
+                is_leaf=True,
+                labels=node.labels.copy(),
+                level=level
+            )
+
+        left_child  = getattr(node, "_left_child", None)   # o node.left_child según tu clase
+        right_child = getattr(node, "_right_child", None)
+
+        left_super  = self._clone_lore_to_super(left_child,  level + 1)
+        right_super = self._clone_lore_to_super(right_child, level + 1)
+
+        return self.SuperNode(
+            feat_num=node.feat,
+            intervals=[node.thresh],
+            children=[left_super, right_super],
+            level=level
+        )
+    
+    def mergeDecisionTrees(self, roots, num_classes, level=0, feature_names=None,
+                        categorical_features=None, global_mapping=None, used_feats=None):
+
+        # ==========================
+        # 🌟 Caso especial solo en la raíz:
+        # Si el LORE (suponemos roots[0]) es el ÚNICO no-hoja
+        # y todos los demás árboles son hojas (supertree trivial, etc.),
+        # entonces el merged = copia estructural del LORE.
+        # ==========================
+        if level == 0:
+            # árboles que NO son hoja
+            non_leaf_roots = [r for r in roots if not r.is_leaf]
+
+            # asumimos que roots[0] es el LORE tree
+            if len(non_leaf_roots) == 1 and non_leaf_roots[0] is roots[0]:
+                merged_root = self._clone_lore_to_super(roots[0], level=0)
+                self.root = merged_root
+                return merged_root
+
+        # ====== A partir de aquí tu código tal cual ======
         # Caso base: todos hoja → fusiona clases
         if all(r.is_leaf for r in roots):
             votes = [np.argmax(r.labels) for r in roots]
@@ -1076,27 +1192,25 @@ class SuperTree(Surrogate):
             for v, c in zip(val, cou):
                 labels[v] = c
             super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-            if level == 0: self.root = super_node
+            if level == 0: 
+                self.root = super_node
             return super_node
 
-        # Selecciona feature más frecuente, con criterio de desempate
         feats = [r.feat for r in roots if r.feat is not None]
         if not feats:
-            # Sin nodos internos válidos, hoja mayoría
             majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
             labels = np.zeros(num_classes)
             for v in majority:
                 labels[v] += 1
             super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-            if level == 0: self.root = super_node
+            if level == 0: 
+                self.root = super_node
             return super_node
 
-        # Contar frecuencia de cada feature
         from collections import Counter
         counts = Counter(feats)
         max_freq = max(counts.values())
         empatadas = [f for f, c in counts.items() if c == max_freq]
-        # Si hay empate y el feature local (roots[0].feat) está entre las empatadas, prioriza el local
         if len(empatadas) > 1:
             if roots[0].feat in empatadas:
                 Xf = roots[0].feat
@@ -1105,20 +1219,17 @@ class SuperTree(Surrogate):
         else:
             Xf = empatadas[0]
 
-        # Umbrales presentes para ese feature
         threshs = sorted(set(r.thresh for r in roots if r.feat == Xf))
-
         if not threshs:
-            # Todos nodos hoja o sin splits para este feature, mayoría
             majority = [np.argmax(r.labels) for r in roots if r.is_leaf]
             labels = np.zeros(num_classes)
             for v in majority:
                 labels[v] += 1
             super_node = self.SuperNode(is_leaf=True, labels=labels, level=level)
-            if level == 0: self.root = super_node
+            if level == 0: 
+                self.root = super_node
             return super_node
 
-        # Sólo el primer threshold para binarizar (igual para categóricas, ajústalo si tienes lógica específica)
         t = threshs[0]
         intervals = [(-float('inf'), t), (t, float('inf'))]
         branches = [self.computeBranch(r, intervals, Xf) for r in roots]
@@ -1126,12 +1237,17 @@ class SuperTree(Surrogate):
         children = []
         for j in range(2):
             child_roots = [b[j] for b in branches]
-            children.append(self.mergeDecisionTrees(child_roots, num_classes, level + 1, feature_names,
-                                                categorical_features, global_mapping, used_feats))
+            children.append(
+                self.mergeDecisionTrees(child_roots, num_classes, level + 1,
+                                        feature_names, categorical_features,
+                                        global_mapping, used_feats)
+            )
 
         super_node = self.SuperNode(feat_num=Xf, intervals=[t], children=children, level=level)
-        if level == 0: self.root = super_node
+        if level == 0: 
+            self.root = super_node
         return super_node
+
 
     def computeBranch(self, node, intervals, feature_idx, verbose=False):
         if node is None:
