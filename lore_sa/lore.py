@@ -92,7 +92,7 @@ class Lore(object):
         return neighbour
 
 
-    def explain(self, x: np.array, num_instances=80, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None, UNIQUE_LABELS=None, client_id=None, round_number=None):
+    def explain(self, x: np.array, num_instances=100, merge=False, num_classes=None, feature_names=None, categorical_features=None, global_mapping=None, UNIQUE_LABELS=None, client_id=None, round_number=None):
 
         """
         Explains a single instance of the dataset.
