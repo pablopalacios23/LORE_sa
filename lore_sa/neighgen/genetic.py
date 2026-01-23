@@ -19,8 +19,8 @@ class LegacyGeneticGenerator(NeighborhoodGenerator):
     Random Generator creates neighbor instances by generating random values starting from an input instance and
     pruning the generation around a fitness function based on proximity to the instance to explain
     """
-    def __init__(self, bbox=None, dataset=None, encoder=None, ocr=0.1,
-                 alpha1=0.5, alpha2=0.5, metric=neuclidean, ngen=100, mutpb=0.2, cxpb=0.5,
+    def __init__(self, bbox=None, dataset=None, encoder=None, ocr=0.4,
+                 alpha1=0.3, alpha2=0.7, metric=neuclidean, ngen=100, mutpb=0.4, cxpb=0.5,
                  tournsize=3, halloffame_ratio=0.1, random_seed=None):
         """
 

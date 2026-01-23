@@ -4,13 +4,13 @@ acc_localTree_localTest,0.6891047923618835
 acc_superTree_globalTest,0.7467532467532467
 acc_superTree_localTest,0.7211948461253245
 client_id,3.5
-cmca_local_global,0.0
+cmca_local_global,0.0028211805555555503
 f1_localTree_globalTest,0.7022321244978408
 f1_localTree_localTest,0.6753753031602737
 f1_superTree_globalTest,0.7226829395504096
 f1_superTree_localTest,0.69861336812219
-fcc_global,0.0015681003584229333
-fcc_local,0.49303527839574834
+fcc_global,0.004561878167099233
+fcc_local,0.5045297533524905
 prec_localTree_globalTest,0.7045984684321923
 prec_localTree_localTest,0.6772465074869317
 prec_superTree_globalTest,0.7491267353336318
@@ -20,5 +20,5 @@ rec_localTree_localTest,0.6891047923618835
 rec_superTree_globalTest,0.7467532467532467
 rec_superTree_localTest,0.7211948461253245
 round,3.0
-silhouette_global,-0.9925190845272743
-silhouette_local,0.09305586365884487
+silhouette_global,-0.9787753046272477
+silhouette_local,0.31152800114285045
