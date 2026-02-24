@@ -3,5 +3,7 @@ from .client_utils import ClientUtilsMixin
 from .labelShardPartitioner import LabelShardPartitioner
 from .feature_skew_partitioner import FeatureSkewPartitioner
 from .explanation_intersection import ExplanationIntersection
+from .label_noise import LabelNoiseInjector
+from .attribute_skew import GaussianAffineSkew
 
-__all__ = ["ClientUtilsMixin","LabelShardPartitioner","FeatureSkewPartitioner", "ExplanationIntersection"]
+__all__ = ["ClientUtilsMixin","LabelShardPartitioner","FeatureSkewPartitioner", "ExplanationIntersection", "LabelNoiseInjector", "GaussianAffineSkew"]
