@@ -86,3 +86,5 @@ class ExplanationIntersection:
         global_vars_list = [self.vars_in_rule(r) for r in cfG]
         vals = [self._align_one(cf, global_vars_list) for cf in cfL]
         return float(np.mean(vals))
+
+

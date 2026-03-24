@@ -199,9 +199,9 @@ class TabularRandomGeneratorLore(Lore):
     
 
 class TabularGeneticGeneratorLore(Lore):
-    def __init__(self, bbox: AbstractBBox, dataset: TabularDataset):
+    def __init__(self, bbox: AbstractBBox, dataset: TabularDataset, random_seed=42):
         encoder = ColumnTransformerEnc(dataset.descriptor)
-        generator = GeneticGenerator(bbox, dataset, encoder, 0.1, random_seed=42)
+        generator = GeneticGenerator(bbox, dataset, encoder, 0.1, random_seed=random_seed)
         surrogate = EnsembleDecisionTreeSurrogate(n_estimators=1)
         super().__init__(bbox, dataset, encoder, generator, surrogate)
 

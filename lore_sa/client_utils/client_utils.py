@@ -9,12 +9,17 @@
 
 import csv
 from graphviz import Digraph
+from networkx import union
 import numpy as np
 import re, os
 from pathlib import Path
 import pandas as pd
 from filelock import FileLock  # pip install filelock
 import pandas as pd, os
+from scipy.spatial.distance import euclidean
+from sklearn.metrics import pairwise_distances
+
+
 
 class ClientUtilsMixin:
 
@@ -901,5 +906,69 @@ class ClientUtilsMixin:
             return float(x)
         except:
             return 0.0
+
+    @staticmethod
+    def explanation_set(exp):
+        # exp = lista de features o condiciones
+        return set(exp)
+
+    @staticmethod
+    def identity_score(X_test, explanations):
+        n = len(X_test)
+        total = 0
+        ok = 0
+        for i in range(n):
+            for j in range(i+1, n):
+                if np.allclose(X_test[i], X_test[j]):
+                    total += 1
+                    if ClientUtilsMixin.explanation_set(explanations[i]) == ClientUtilsMixin.explanation_set(explanations[j]):
+                        ok += 1
+        return ok / total if total > 0 else np.nan
+
+
+    @staticmethod
+    def stability_score(y_test, explanations):
+        scores = []
+        for c in np.unique(y_test):
+            idx = np.where(y_test == c)[0]
+            for i in range(len(idx)):
+                for j in range(i+1, len(idx)):
+                    a = set(explanations[idx[i]])
+                    b = set(explanations[idx[j]])
+                    union = len(a | b)
+                    if union == 0:
+                        jaccard = 1.0
+                    else:
+                        jaccard = len(a & b) / union
+                    scores.append(jaccard)
+        return np.mean(scores)
+    
+    @staticmethod
+    def separability_score(explanations):
+        n = len(explanations)
+        duplicates = 0
+        for i in range(n):
+            for j in range(i+1, n):
+                if set(explanations[i]) == set(explanations[j]):
+                    duplicates += 1
+        return 1 - duplicates / (n*(n-1)/2)
+    
+
+
+    @staticmethod
+    def similarity_score(X_test, explanations):
+        scores = []
+        for i in range(len(X_test)):
+            for j in range(i+1, len(X_test)):
+                d_x = euclidean(X_test[i], X_test[j])
+                a = set(explanations[i])
+                b = set(explanations[j])
+                union = len(a | b)
+                if union == 0:
+                    d_e = 0.0
+                else:
+                    d_e = 1 - len(a & b) / union
+                scores.append(abs(d_x - d_e))
+        return np.mean(scores)
 
     
