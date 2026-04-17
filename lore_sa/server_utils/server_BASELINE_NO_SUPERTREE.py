@@ -20,12 +20,13 @@
 #   )
 # ============================
 
+import os
 import numpy as np
 from typing import List, Tuple, Dict
 
 import torch
 
-from flwr.common import Context, Metrics, Scalar, ndarrays_to_parameters
+from flwr.common import Context, Metrics, Scalar, ndarrays_to_parameters, parameters_to_ndarrays
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.strategy import FedAvg
 
@@ -66,6 +67,8 @@ def make_server_app(
     unique_labels,
     features,
     load_data_fn,
+    final_explain_only=True,
+    final_only_idx=None,
 ):
     """
     Crea un ServerApp de Flower parametrizado (FedAvg puro).
@@ -108,12 +111,31 @@ def make_server_app(
             initial_parameters=initial_params,
         )
 
+        original_aggregate_fit = strategy.aggregate_fit
+
+        def aggregate_fit_and_save(server_round, results, failures):
+            aggregated = original_aggregate_fit(server_round, results, failures)
+            if aggregated is None:
+                return aggregated
+
+            params, _ = aggregated
+            nn_weights = parameters_to_ndarrays(params)
+            state_dict = model.state_dict()
+            for key, arr in zip(state_dict.keys(), nn_weights):
+                state_dict[key] = torch.tensor(arr)
+
+            os.makedirs("results", exist_ok=True)
+            torch.save(state_dict, "results/bb_global_final.pth")
+            return aggregated
+
+        strategy.aggregate_fit = aggregate_fit_and_save
+
         # Inyectar server_round y explain_only en cada ronda
         strategy.configure_fit = _inject_round(
-            strategy.configure_fit, num_server_rounds
+            strategy.configure_fit, num_server_rounds, final_explain_only, final_only_idx
         )
         strategy.configure_evaluate = _inject_round(
-            strategy.configure_evaluate, num_server_rounds
+            strategy.configure_evaluate, num_server_rounds, final_explain_only, final_only_idx
         )
 
         return ServerAppComponents(
@@ -128,7 +150,7 @@ def make_server_app(
 # Helper: inyectar config en cada ronda
 # ====================================================================
 
-def _inject_round(original_fn, num_server_rounds):
+def _inject_round(original_fn, num_server_rounds, final_explain_only=True, final_only_idx=None):
     """
     Wrapper que añade server_round a la config de cada cliente.
     En la última ronda, marca explain_only=True.
@@ -138,8 +160,10 @@ def _inject_round(original_fn, num_server_rounds):
         for _, ins in instructions:
             ins.config["server_round"] = server_round
 
-            if server_round == num_server_rounds:
+            if final_explain_only and server_round == num_server_rounds:
                 ins.config["explain_only"] = True
+                if final_only_idx is not None:
+                    ins.config["only_idx"] = final_only_idx
 
         return instructions
     return wrapper

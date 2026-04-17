@@ -16,7 +16,6 @@ from pathlib import Path
 import pandas as pd
 from filelock import FileLock  # pip install filelock
 import pandas as pd, os
-from scipy.spatial.distance import euclidean
 from sklearn.metrics import pairwise_distances
 
 
@@ -336,7 +335,7 @@ class ClientUtilsMixin:
             for i, child in enumerate(node.children):
                 cond = f'{var} {"≠" if i == 0 else "="} "{val}"'
                 result += f"{indent}if {cond}\n"
-                result += self.tree_to_str(child, feature_names, numeric_features, None, global_mapping, unique_labels, depth + 1)
+                result += self.tree_to_str(child, feature_names, numeric_features, scaler, global_mapping, unique_labels, depth + 1)
             return result
 
         # --- Categórica ordinal con mapping global
@@ -350,14 +349,23 @@ class ClientUtilsMixin:
                 val = vals_cat[val_idx] if 0 <= val_idx < len(vals_cat) else f"desconocido({val_idx})"
                 cond = f'{fname} {"≠" if i == 0 else "="} "{val}"'
                 result += f"{indent}if {cond}\n"
-                result += self.tree_to_str(child, feature_names, numeric_features, None, global_mapping, unique_labels, depth + 1)
+                result += self.tree_to_str(child, feature_names, numeric_features, scaler, global_mapping, unique_labels, depth + 1)
             return result
 
-        # --- Numérica (en crudo, sin desescalar)
+        # --- Numérica (desescalada si se pasa scaler)
         if numeric_features and fname in numeric_features:
-            # Construir límites crudos
+            # Helper: inverse-transform a single finite threshold for this feature
+            num_feat_list = list(numeric_features)
+            def _inv(val, _fname=fname, _scaler=scaler, _nfl=num_feat_list):
+                if not np.isfinite(val) or _scaler is None or _fname not in _nfl:
+                    return val
+                pos = _nfl.index(_fname)
+                dummy = np.zeros((1, len(_nfl)), dtype=np.float32)
+                dummy[0, pos] = val
+                return float(_scaler.inverse_transform(dummy)[0, pos])
+
+            # Construir límites (en espacio normalizado)
             intervals = list(getattr(node, "intervals", []))
-            # Si no hay intervals (p.ej. árbol binario con `thresh`), construiremos [-inf, thresh, +inf]
             if not intervals and hasattr(node, "thresh"):
                 try:
                     intervals = [float(node.thresh)]
@@ -365,29 +373,30 @@ class ClientUtilsMixin:
                     intervals = []
 
             bounds = [-np.inf] + intervals
-            # Asegurar len(bounds) = len(children)+1
             while len(bounds) < len(node.children) + 1:
                 bounds.append(np.inf)
 
             for i, child in enumerate(node.children):
                 left = bounds[i]
                 right = bounds[i + 1]
+                left_r = _inv(left)
+                right_r = _inv(right)
                 if i == 0:
-                    cond = f"{fname} ≤ {right:.2f}" if np.isfinite(right) else f"{fname} ≤ ?"
+                    cond = f"{fname} ≤ {right_r:.2f}" if np.isfinite(right_r) else f"{fname} ≤ ?"
                 elif i == len(node.children) - 1:
-                    cond = f"{fname} > {left:.2f}" if np.isfinite(left) else f"{fname} > ?"
+                    cond = f"{fname} > {left_r:.2f}" if np.isfinite(left_r) else f"{fname} > ?"
                 else:
-                    ltxt = f"{left:.2f}" if np.isfinite(left) else "?"
-                    rtxt = f"{right:.2f}" if np.isfinite(right) else "?"
+                    ltxt = f"{left_r:.2f}" if np.isfinite(left_r) else "?"
+                    rtxt = f"{right_r:.2f}" if np.isfinite(right_r) else "?"
                     cond = f"{fname} ∈ ({ltxt}, {rtxt}]"
                 result += f"{indent}if {cond}\n"
-                result += self.tree_to_str(child, feature_names, numeric_features, None, global_mapping, unique_labels, depth + 1)
+                result += self.tree_to_str(child, feature_names, numeric_features, scaler, global_mapping, unique_labels, depth + 1)
             return result
 
         # --- Desconocido
         for child in node.children:
             result += f"{indent}if {fname} ?\n"
-            result += self.tree_to_str(child, feature_names, numeric_features, None, global_mapping, unique_labels, depth + 1)
+            result += self.tree_to_str(child, feature_names, numeric_features, scaler, global_mapping, unique_labels, depth + 1)
         return result
     
 
@@ -913,6 +922,15 @@ class ClientUtilsMixin:
         return set(exp)
 
     @staticmethod
+    def _jaccard_similarity(exp_a, exp_b):
+        a = ClientUtilsMixin.explanation_set(exp_a)
+        b = ClientUtilsMixin.explanation_set(exp_b)
+        union = len(a | b)
+        if union == 0:
+            return 1.0
+        return len(a & b) / union
+
+    @staticmethod
     def identity_score(X_test, explanations):
         n = len(X_test)
         total = 0
@@ -927,48 +945,42 @@ class ClientUtilsMixin:
 
 
     @staticmethod
-    def stability_score(y_test, explanations):
+    def local_stability_score(X_test, y_test, explanations, k=5):
+        X_test = np.asarray(X_test)
+        y_test = np.asarray(y_test)
         scores = []
-        for c in np.unique(y_test):
-            idx = np.where(y_test == c)[0]
-            for i in range(len(idx)):
-                for j in range(i+1, len(idx)):
-                    a = set(explanations[idx[i]])
-                    b = set(explanations[idx[j]])
-                    union = len(a | b)
-                    if union == 0:
-                        jaccard = 1.0
-                    else:
-                        jaccard = len(a & b) / union
-                    scores.append(jaccard)
-        return np.mean(scores)
+
+        for i in range(len(X_test)):
+            same_class_idx = np.where(y_test == y_test[i])[0]
+            same_class_idx = same_class_idx[same_class_idx != i]
+            if len(same_class_idx) == 0:
+                continue
+
+            distances = pairwise_distances(
+                X_test[i].reshape(1, -1),
+                X_test[same_class_idx],
+                metric="euclidean",
+            ).ravel()
+            k_eff = min(k, len(same_class_idx))
+            nearest_pos = np.argsort(distances)[:k_eff]
+            nearest_idx = same_class_idx[nearest_pos]
+
+            for j in nearest_idx:
+                scores.append(ClientUtilsMixin._jaccard_similarity(explanations[i], explanations[j]))
+
+        return np.mean(scores) if scores else np.nan
     
     @staticmethod
     def separability_score(explanations):
         n = len(explanations)
+        if n < 2:
+            return np.nan
         duplicates = 0
         for i in range(n):
             for j in range(i+1, n):
-                if set(explanations[i]) == set(explanations[j]):
+                if ClientUtilsMixin.explanation_set(explanations[i]) == ClientUtilsMixin.explanation_set(explanations[j]):
                     duplicates += 1
         return 1 - duplicates / (n*(n-1)/2)
     
-
-
-    @staticmethod
-    def similarity_score(X_test, explanations):
-        scores = []
-        for i in range(len(X_test)):
-            for j in range(i+1, len(X_test)):
-                d_x = euclidean(X_test[i], X_test[j])
-                a = set(explanations[i])
-                b = set(explanations[j])
-                union = len(a | b)
-                if union == 0:
-                    d_e = 0.0
-                else:
-                    d_e = 1 - len(a & b) / union
-                scores.append(abs(d_x - d_e))
-        return np.mean(scores)
 
     

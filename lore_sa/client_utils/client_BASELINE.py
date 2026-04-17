@@ -46,7 +46,6 @@ from flwr.client import NumPyClient, ClientApp
 from flwr.common import Context
 
 from lore_sa.dataset import TabularDataset
-from lore_sa.bbox import sklearn_classifier_bbox
 from lore_sa.lore import TabularGeneticGeneratorLore
 from lore_sa.rule import Expression, Rule
 from lore_sa.surrogate.decision_tree import EnsembleDecisionTreeSurrogate, SuperTree
@@ -67,6 +66,28 @@ from lore_sa.client_utils.explanation_metrics import Explainer_metrics
 # ====================================================================
 # Wrappers / Modelos
 # ====================================================================
+
+class LoreBBox:
+    """Wrapper que acepta entrada normalizada (MinMaxScaler) y desnormaliza antes de llamar al NN."""
+    def __init__(self, nn_model, lore_scaler, num_idx):
+        self.nn = nn_model
+        self.scaler = lore_scaler
+        self.num_idx = np.asarray(num_idx, dtype=int)
+
+    def _denorm(self, X):
+        Xr = np.asarray(X, dtype=np.float32).copy()
+        if Xr.ndim == 1:
+            Xr = Xr[None, :]
+        if len(self.num_idx) > 0:
+            Xr[:, self.num_idx] = self.scaler.inverse_transform(Xr[:, self.num_idx])
+        return Xr
+
+    def predict(self, X):
+        return self.nn.predict(self._denorm(X))
+
+    def predict_proba(self, X):
+        return self.nn.predict_proba(self._denorm(X))
+
 
 class TorchNNWrapper:
     def __init__(self, model, num_idx, mean, scale):
@@ -160,6 +181,12 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         self.y_test_nn = y_test.astype(np.int64)
         self.received_supertree = None
         self.preprocessor = preprocessor
+
+        # ── MinMaxScaler exclusivo para LORE (normaliza solo numéricas) ──
+        from sklearn.preprocessing import MinMaxScaler as _MMS
+        self.lore_scaler = _MMS()
+        if len(self.num_idx) > 0:
+            self.lore_scaler.fit(self.X_train[:, self.num_idx])
 
         # ── Referencias inyectadas desde notebook ──
         self._UNIQUE_LABELS = _UNIQUE_LABELS
@@ -340,47 +367,80 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             self.local_metrics["acc_nn_local_globalTest"]  = accuracy_score(self.y_test_global, self.bb_local.predict(self.X_test_global))
             self.local_metrics["acc_nn_global_globalTest"] = accuracy_score(self.y_test_global, self.bb_global.predict(self.X_test_global))
 
-            n_bg = min(50, len(self.X_train))
-            idx_bg = np.random.choice(len(self.X_train), n_bg, replace=False)
-            self.shap_background = self.X_train[idx_bg]
+            self.local_metrics["pred_agreement_localTest"] = float(np.mean(
+                self.bb_local.predict(self.X_test) == self.bb_global.predict(self.X_test)
+            ))
+            self.local_metrics["pred_agreement_globalTest"] = float(np.mean(
+                self.bb_local.predict(self.X_test_global) == self.bb_global.predict(self.X_test_global)
+            ))
 
-            self.shap_explainer_local = shap.KernelExplainer(
-                self.bb_local.predict_proba,
-                self.shap_background
-            )
+            # SHAP — dos backgrounds: test local y test global
+            rng = np.random.RandomState(42)
 
-            self.shap_explainer_global = shap.KernelExplainer(
-                self.bb_global.predict_proba,
-                self.shap_background
-            )
+            n_bg_tl = min(50, len(self.X_test))
+            idx_bg_tl = rng.choice(len(self.X_test), n_bg_tl, replace=False)
+            shap_bg_testlocal = self.X_test[idx_bg_tl]
+
+            n_bg_tg = min(50, len(self.X_test_global))
+            idx_bg_tg = rng.choice(len(self.X_test_global), n_bg_tg, replace=False)
+            shap_bg_testglobal = self.X_test_global[idx_bg_tg]
+
+            self.shap_explainer_testlocal_local   = shap.KernelExplainer(self.bb_local.predict_proba,  shap_bg_testlocal)
+            self.shap_explainer_testlocal_global  = shap.KernelExplainer(self.bb_global.predict_proba, shap_bg_testlocal)
+            self.shap_explainer_testglobal_local  = shap.KernelExplainer(self.bb_local.predict_proba,  shap_bg_testglobal)
+            self.shap_explainer_testglobal_global = shap.KernelExplainer(self.bb_global.predict_proba, shap_bg_testglobal)
 
             categorical_features_lime = [
                 i for i, f in enumerate(self.feature_names)
                 if "_" in f
             ]
 
-            self.lime_explainer = LimeTabularExplainer(
-                training_data=self.X_train,
+            self.lime_explainer_testlocal = LimeTabularExplainer(
+                training_data=self.X_test,
                 feature_names=self.feature_names,
                 class_names=self.unique_labels,
                 categorical_features=categorical_features_lime,
                 mode="classification",
+                feature_selection="none",
+                random_state=42
+            )
+            self.lime_explainer_testglobal = LimeTabularExplainer(
+                training_data=self.X_test_global,
+                feature_names=self.feature_names,
+                class_names=self.unique_labels,
+                categorical_features=categorical_features_lime,
+                mode="classification",
+                feature_selection="none",
                 random_state=42
             )
 
-            self.anchor_explainer_global = AnchorTabular(
+            self.anchor_explainer_testlocal_global = AnchorTabular(
                 predictor=self.bb_global.predict,
                 feature_names=self.feature_names,
                 seed=42
             )
-            self.anchor_explainer_global.fit(self.X_train)
+            self.anchor_explainer_testlocal_global.fit(self.X_test)
 
-            self.anchor_explainer_local = AnchorTabular(
+            self.anchor_explainer_testlocal_local = AnchorTabular(
                 predictor=self.bb_local.predict,
                 feature_names=self.feature_names,
                 seed=42
             )
-            self.anchor_explainer_local.fit(self.X_train)
+            self.anchor_explainer_testlocal_local.fit(self.X_test)
+
+            self.anchor_explainer_testglobal_global = AnchorTabular(
+                predictor=self.bb_global.predict,
+                feature_names=self.feature_names,
+                seed=42
+            )
+            self.anchor_explainer_testglobal_global.fit(self.X_test_global)
+
+            self.anchor_explainer_testglobal_local = AnchorTabular(
+                predictor=self.bb_local.predict,
+                feature_names=self.feature_names,
+                seed=42
+            )
+            self.anchor_explainer_testglobal_local.fit(self.X_test_global)
 
             # métricas de modelo pre-calculadas una sola vez
             y_pred_supertree        = self.received_supertree.predict(self.X_test)
@@ -405,7 +465,6 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             }
 
             self.explain_all_test_instances(config)
-
         return 0.0, len(self.X_test), {}
 
     def _explain_one_instance(self, num_row, config, save_trees=False):
@@ -428,18 +487,25 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             self.bb_global, row, self.label_encoder
         )
 
+        # ── Dataset normalizado para LORE (numéricas en [0,1]) ──
+        X_train_lore = self.X_train.copy()
+        if len(self.num_idx) > 0:
+            X_train_lore[:, self.num_idx] = self.lore_scaler.transform(self.X_train[:, self.num_idx])
+
         local_tabular_dataset = Explainer_metrics.build_tabular_dataset(
-            self.X_train,
-            self.y_train_nn,
-            self.feature_names,
-            self.label_encoder
+            X_train_lore, self.y_train_nn, self.feature_names, self.label_encoder
         )
 
+        row_lore = row.copy()
+        if len(self.num_idx) > 0:
+            row_lore[self.num_idx] = self.lore_scaler.transform(row[self.num_idx].reshape(1, -1))[0]
+        x_instance_lore = pd.Series(row_lore, index=self.feature_names)
         x_instance = pd.Series(self.X_test[num_row], index=self.feature_names)
         round_number = config.get("server_round", 1)
 
         # 2) Vecindad GLOBAL (LORE)
-        bbox_global_for_Z = sklearn_classifier_bbox.sklearnBBox(self.bb_global)
+        np.random.seed(42 + num_row)
+        bbox_global_for_Z = LoreBBox(self.bb_global, self.lore_scaler, self.num_idx)
 
         lore_vecindad_global = TabularGeneticGeneratorLore(
             bbox_global_for_Z,
@@ -448,7 +514,7 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         )
 
         explanation_global = lore_vecindad_global.explain_instance(
-            x_instance,
+            x_instance_lore,
             merge=True,
             num_classes=len(self._UNIQUE_LABELS),
             feature_names=self.feature_names,
@@ -460,8 +526,12 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         )
 
         lore_tree_global = explanation_global["merged_tree"]
-        Z_global = explanation_global["neighborhood_Z"]
+        Z_global_norm = explanation_global["neighborhood_Z"]
         y_bb_global = explanation_global["neighborhood_Yb"]
+        # Desnormalizar Z para coverage y reglas (espacio raw)
+        Z_global = Z_global_norm.copy()
+        if len(self.num_idx) > 0:
+            Z_global[:, self.num_idx] = self.lore_scaler.inverse_transform(Z_global_norm[:, self.num_idx])
         dfZ_global = pd.DataFrame(Z_global, columns=self.feature_names)
 
         if save_trees:
@@ -475,32 +545,34 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
                 folder="lore_tree_global"
             )
 
-        # 3) SHAP GLOBAL
-        top_features_global = Explainer_metrics.compute_top_shap_features(
-            self.shap_explainer_global,
-            row,
-            pred_class_idx_global,
-            self.feature_names
+        # 3) SHAP GLOBAL (testlocal background)
+        top_features_global, shap_coefs_testlocal_global = Explainer_metrics.compute_shap_all(
+            self.shap_explainer_testlocal_global, row, pred_class_idx_global, self.feature_names
         )
 
         # 4) LIME GLOBAL
+        lime_seed = 42 + num_row
         lime_rules_global = Explainer_metrics.compute_lime_rules(
-            self.lime_explainer,
-            row,
-            self.bb_global.predict_proba,
-            self.feature_names
+            self.lime_explainer_testlocal, row, self.bb_global.predict_proba, self.feature_names
+        )
+        lime_coefs_testlocal_global = Explainer_metrics.compute_lime_coefs(
+            self.lime_explainer_testlocal, row, self.bb_global.predict_proba,
+            len(self.feature_names), pred_class_idx_global, random_state=lime_seed,
+        )
+        lime_coefs_testglobal_global = Explainer_metrics.compute_lime_coefs(
+            self.lime_explainer_testglobal, row, self.bb_global.predict_proba,
+            len(self.feature_names), pred_class_idx_global, random_state=lime_seed,
         )
 
         # 5) ANCHOR GLOBAL
-        anchor_rules_global = Explainer_metrics.compute_anchor_rules(
-            self.anchor_explainer_global,
-            row,
-            0.85,
-            self.feature_names
-        )
+        anchor_rules_testlocal_global, anchor_prec_testlocal_global, anchor_cov_testlocal_global = \
+            Explainer_metrics.compute_anchor_all(self.anchor_explainer_testlocal_global, row, 0.85, self.feature_names)
+        anchor_rules_testglobal_global, anchor_prec_testglobal_global, anchor_cov_testglobal_global = \
+            Explainer_metrics.compute_anchor_all(self.anchor_explainer_testglobal_global, row, 0.85, self.feature_names)
 
         # 6) Vecindad LOCAL (LORE)
-        bbox_local = sklearn_classifier_bbox.sklearnBBox(self.bb_local)
+        np.random.seed(42 + num_row)
+        bbox_local = LoreBBox(self.bb_local, self.lore_scaler, self.num_idx)
 
         lore_vecindad_local = TabularGeneticGeneratorLore(
             bbox_local,
@@ -509,7 +581,7 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         )
 
         explanation_local = lore_vecindad_local.explain_instance(
-            x_instance,
+            x_instance_lore,
             merge=True,
             num_classes=len(self._UNIQUE_LABELS),
             feature_names=self.feature_names,
@@ -521,10 +593,18 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         )
 
         lore_tree_local = explanation_local["merged_tree"]
-        Z_local = explanation_local["neighborhood_Z"]
+        Z_local_norm = explanation_local["neighborhood_Z"]
         y_bb_local = explanation_local["neighborhood_Yb"]
+        # Desnormalizar Z para coverage y reglas (espacio raw)
+        Z_local = Z_local_norm.copy()
+        if len(self.num_idx) > 0:
+            Z_local[:, self.num_idx] = self.lore_scaler.inverse_transform(Z_local_norm[:, self.num_idx])
         dfZ_local = pd.DataFrame(Z_local, columns=self.feature_names)
 
+        # tree_fidelity: usar Z normalizado (el árbol se entrenó en ese espacio)
+        tree_fidelity_lore_global = np.nan if lore_tree_global is None or lore_tree_global.root is None else float(np.mean(lore_tree_global.root.predict(Z_global_norm) == y_bb_global))
+        tree_fidelity_lore_local = np.nan if lore_tree_local is None or lore_tree_local.root is None else float(np.mean(lore_tree_local.root.predict(Z_local_norm) == y_bb_local))
+        
         if save_trees:
             self.save_lore_tree_image(
                 lore_tree_local.root,
@@ -536,36 +616,60 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
                 folder="lore_tree_local"
             )
 
-        # 7) SHAP LOCAL
-        top_features_local = Explainer_metrics.compute_top_shap_features(
-            self.shap_explainer_local,
-            row,
-            pred_class_idx_local,
-            self.feature_names
+        # 7) SHAP LOCAL (testlocal background) + deltas testlocal y testglobal
+        top_features_local, shap_coefs_testlocal_local = Explainer_metrics.compute_shap_all(
+            self.shap_explainer_testlocal_local, row, pred_class_idx_local, self.feature_names
         )
+
+        if pred_class_idx_local == pred_class_idx_global:
+            delta_shap_testlocal = Explainer_metrics.delta_shap(shap_coefs_testlocal_local, shap_coefs_testlocal_global)
+        else:
+            delta_shap_testlocal = np.nan
+
+        _, shap_coefs_testglobal_local = Explainer_metrics.compute_shap_all(
+            self.shap_explainer_testglobal_local, row, pred_class_idx_local, self.feature_names
+        )
+        _, shap_coefs_testglobal_global = Explainer_metrics.compute_shap_all(
+            self.shap_explainer_testglobal_global, row, pred_class_idx_global, self.feature_names
+        )
+
+        if pred_class_idx_local == pred_class_idx_global:
+            delta_shap_testglobal = Explainer_metrics.delta_shap(shap_coefs_testglobal_local, shap_coefs_testglobal_global)
+        else:
+            delta_shap_testglobal = np.nan
 
         # 8) LIME LOCAL
         lime_rules_local = Explainer_metrics.compute_lime_rules(
-            self.lime_explainer,
-            row,
-            self.bb_local.predict_proba,
-            self.feature_names
+            self.lime_explainer_testlocal, row, self.bb_local.predict_proba, self.feature_names
+        )
+        lime_coefs_testlocal_local = Explainer_metrics.compute_lime_coefs(
+            self.lime_explainer_testlocal, row, self.bb_local.predict_proba,
+            len(self.feature_names), pred_class_idx_local, random_state=lime_seed,
+        )
+        lime_coefs_testglobal_local = Explainer_metrics.compute_lime_coefs(
+            self.lime_explainer_testglobal, row, self.bb_local.predict_proba,
+            len(self.feature_names), pred_class_idx_local, random_state=lime_seed,
         )
 
+        if pred_class_idx_local == pred_class_idx_global:
+            delta_lime_testlocal  = Explainer_metrics.delta_lime(lime_coefs_testlocal_local,  lime_coefs_testlocal_global)
+            delta_lime_testglobal = Explainer_metrics.delta_lime(lime_coefs_testglobal_local, lime_coefs_testglobal_global)
+        else:
+            delta_lime_testlocal  = np.nan
+            delta_lime_testglobal = np.nan
+
         # 9) ANCHOR LOCAL
-        anchor_rules_local = Explainer_metrics.compute_anchor_rules(
-            self.anchor_explainer_local,
-            row,
-            0.85,
-            self.feature_names
-        )
+        anchor_rules_testlocal_local, anchor_prec_testlocal_local, anchor_cov_testlocal_local = \
+            Explainer_metrics.compute_anchor_all(self.anchor_explainer_testlocal_local, row, 0.85, self.feature_names)
+        anchor_rules_testglobal_local, anchor_prec_testglobal_local, anchor_cov_testglobal_local = \
+            Explainer_metrics.compute_anchor_all(self.anchor_explainer_testglobal_local, row, 0.85, self.feature_names)
 
         # 10) Árboles → string
         lore_tree_local_str = self.tree_to_str(
             lore_tree_local.root,
             self.feature_names,
             numeric_features=self.numeric_features,
-            scaler=None,
+            scaler=self.lore_scaler,
             global_mapping=self.global_mapping,
             unique_labels=self.unique_labels
         )
@@ -574,7 +678,7 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             lore_tree_global.root,
             self.feature_names,
             numeric_features=self.numeric_features,
-            scaler=None,
+            scaler=self.lore_scaler,
             global_mapping=self.global_mapping,
             unique_labels=self.unique_labels
         )
@@ -625,22 +729,86 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         self.exp_shap_global.append(top_features_global)
         self.exp_lime_local.append(lime_rules_local)
         self.exp_lime_global.append(lime_rules_global)
-        self.exp_anchor_local.append(anchor_rules_local)
-        self.exp_anchor_global.append(anchor_rules_global)
+        self.exp_anchor_testlocal_local.append(anchor_rules_testlocal_local)
+        self.exp_anchor_testlocal_global.append(anchor_rules_testlocal_global)
+        self.exp_anchor_testglobal_local.append(anchor_rules_testglobal_local)
+        self.exp_anchor_testglobal_global.append(anchor_rules_testglobal_global)
         self.exp_lore_local.append(rules_factual_local[0] if rules_factual_local else [])
         self.exp_lore_global.append(rules_factual_global[0] if rules_factual_global else [])
 
         # 13) Jaccard / Coverage
-        has_factual = bool(rules_factual_local) and bool(rules_factual_global)
+        has_factual_local = bool(rules_factual_local)
+        has_factual_global = bool(rules_factual_global)
+        has_factual = has_factual_local and has_factual_global
+
+        cov_ruleLocal_on_localZ = Explainer_metrics.compute_single_rule_coverage(
+            dfZ_local, rules_factual_local[0] if has_factual_local else None
+        )
+        cov_ruleLocal_on_globalZ = Explainer_metrics.compute_single_rule_coverage(
+            dfZ_global, rules_factual_local[0] if has_factual_local else None
+        )
+        cov_ruleGlobal_on_localZ = Explainer_metrics.compute_single_rule_coverage(
+            dfZ_local, rules_factual_global[0] if has_factual_global else None
+        )
+        cov_ruleGlobal_on_globalZ = Explainer_metrics.compute_single_rule_coverage(
+            dfZ_global, rules_factual_global[0] if has_factual_global else None
+        )
 
         if not has_factual:
             jaccard_cov_global = covL_g = covG_g = covInter_g = covUnion_g = np.nan
             jaccard_cov_local  = covL_l = covG_l = covInter_l = covUnion_l = np.nan
+            jaccard_cov_combined = covL_c = covG_c = covInter_c = covUnion_c = np.nan
         else:
+            dfZ_combined = pd.concat([dfZ_local, dfZ_global], ignore_index=True)
             jaccard_cov_global, covL_g, covG_g, covInter_g, covUnion_g = \
                 Explainer_metrics.compute_rule_overlap(dfZ_global, rules_factual_local[0], rules_factual_global[0])
             jaccard_cov_local, covL_l, covG_l, covInter_l, covUnion_l = \
                 Explainer_metrics.compute_rule_overlap(dfZ_local, rules_factual_local[0], rules_factual_global[0])
+            jaccard_cov_combined, covL_c, covG_c, covInter_c, covUnion_c = \
+                Explainer_metrics.compute_rule_overlap(dfZ_combined, rules_factual_local[0], rules_factual_global[0])
+            
+        # ── Cross-explainer consistency (comentado) ──
+        # def _extract_feature_names(rules, feature_names):
+        #     feats = set()
+        #     if isinstance(rules, list):
+        #         for r in rules:
+        #             if isinstance(r, str):
+        #                 for f in feature_names:
+        #                     if f in r:
+        #                         feats.add(f)
+        #             elif isinstance(r, dict) and "feature" in r:
+        #                 feats.add(r["feature"])
+        #     return feats
+        #
+        # def _jaccard_pairwise_mean(feature_sets):
+        #     non_empty = [set(f) for f in feature_sets if f]
+        #     if len(non_empty) < 2:
+        #         return np.nan
+        #     scores = []
+        #     for i in range(len(non_empty)):
+        #         for j in range(i + 1, len(non_empty)):
+        #             union = non_empty[i] | non_empty[j]
+        #             if not union:
+        #                 scores.append(1.0)
+        #             else:
+        #                 scores.append(len(non_empty[i] & non_empty[j]) / len(union))
+        #     return float(np.mean(scores)) if scores else np.nan
+        #
+        # feats_shap_global = set(top_features_global) if top_features_global else set()
+        # feats_lime_global = _extract_feature_names(lime_rules_global, self.feature_names)
+        # feats_lore_global = _extract_feature_names(
+        #     [rules_factual_global[0]] if rules_factual_global else [], self.feature_names
+        # )
+        # all_feats_global = [feats_shap_global, feats_lime_global, feats_lore_global]
+        # cross_explainer_global = _jaccard_pairwise_mean(all_feats_global)
+        #
+        # feats_shap_local = set(top_features_local) if top_features_local else set()
+        # feats_lime_local = _extract_feature_names(lime_rules_local, self.feature_names)
+        # feats_lore_local = _extract_feature_names(
+        #     [rules_factual_local[0]] if rules_factual_local else [], self.feature_names
+        # )
+        # all_feats_local = [feats_shap_local, feats_lime_local, feats_lore_local]
+        # cross_explainer_local = _jaccard_pairwise_mean(all_feats_local)
 
         # 14) Silhouette
         x = self.X_test[num_row]
@@ -665,8 +833,10 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             "bbox_pred_class_global": str(pred_class_global),
             "bbox_pred_class_local":  str(pred_class_local),
 
-            "silhouette_global": float(silhouette_global),
-            "silhouette_local":  float(silhouette_local),
+            "silhouette_global_LORE": float(silhouette_global),
+            "silhouette_local_LORE":  float(silhouette_local),
+            "tree_fidelity_lore_global": float(tree_fidelity_lore_global),
+            "tree_fidelity_lore_local":  float(tree_fidelity_lore_local),
 
             # SuperTree / local test
             "acc_superTree_localTest":  float(m["acc_supertree_localTest"]),
@@ -698,18 +868,44 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             "acc_nn_local_globalTest":  float(self.local_metrics["acc_nn_local_globalTest"]),
             "acc_nn_global_globalTest": float(self.local_metrics["acc_nn_global_globalTest"]),
 
-            # Jaccard / coverage
-            "jaccard_cov_globalZ": float(jaccard_cov_global),
-            "covL_globalZ":        float(covL_g),
-            "covG_globalZ":        float(covG_g),
-            "covInter_globalZ":    float(covInter_g),
-            "covUnion_globalZ":    float(covUnion_g),
+            "has_factual_local":  int(has_factual_local),
+            "has_factual_global": int(has_factual_global),
+            "cov_ruleLocal_on_localZ_LORE":   float(cov_ruleLocal_on_localZ),
+            "cov_ruleLocal_on_globalZ_LORE":  float(cov_ruleLocal_on_globalZ),
+            "cov_ruleGlobal_on_localZ_LORE":  float(cov_ruleGlobal_on_localZ),
+            "cov_ruleGlobal_on_globalZ_LORE": float(cov_ruleGlobal_on_globalZ),
 
-            "jaccard_cov_localZ": float(jaccard_cov_local),
-            "covL_localZ":        float(covL_l),
-            "covG_localZ":        float(covG_l),
-            "covInter_localZ":    float(covInter_l),
-            "covUnion_localZ":    float(covUnion_l),
+            # Jaccard / coverage
+            "jaccard_cov_globalZ_LORE": float(jaccard_cov_global),
+            "covInter_globalZ_LORE":    float(covInter_g),
+            "covUnion_globalZ_LORE":    float(covUnion_g),
+
+            "jaccard_cov_localZ_LORE": float(jaccard_cov_local),
+            "covInter_localZ_LORE":    float(covInter_l),
+            "covUnion_localZ_LORE":    float(covUnion_l),
+
+            "jaccard_cov_combinedZ_LORE": float(jaccard_cov_combined),
+            "covInter_combinedZ_LORE":    float(covInter_c),
+            "covUnion_combinedZ_LORE":    float(covUnion_c),
+
+            "delta_lime_testlocal":          float(delta_lime_testlocal),
+            "delta_lime_testglobal":         float(delta_lime_testglobal),
+            "delta_shap_testlocal":          float(delta_shap_testlocal),
+            "delta_shap_testglobal":         float(delta_shap_testglobal),
+
+            "anchor_prec_testlocal_local":   float(anchor_prec_testlocal_local),
+            "anchor_prec_testlocal_global":  float(anchor_prec_testlocal_global),
+            "anchor_prec_testglobal_local":  float(anchor_prec_testglobal_local),
+            "anchor_prec_testglobal_global": float(anchor_prec_testglobal_global),
+            "anchor_cov_testlocal_local":    float(anchor_cov_testlocal_local),
+            "anchor_cov_testlocal_global":   float(anchor_cov_testlocal_global),
+            "anchor_cov_testglobal_local":   float(anchor_cov_testglobal_local),
+            "anchor_cov_testglobal_global":  float(anchor_cov_testglobal_global),
+
+            # "cross_explainer_global": float(cross_explainer_global),
+            # "cross_explainer_local":  float(cross_explainer_local),
+            "pred_agreement_localTest":  float(self.local_metrics["pred_agreement_localTest"]),
+            "pred_agreement_globalTest": float(self.local_metrics["pred_agreement_globalTest"]),
         }
 
         self._append_client_csv(row, filename="Balanced")
@@ -725,7 +921,7 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
                 row = self._explain_one_instance(i, config, save_trees=save_trees_flag)
                 results.append(row)
             except Exception as e:
-                print(f"[Cliente {self.client_id}] ⚠️ Error en instancia {i}: {e}")
+                print(f"[Cliente {self.client_id}] ?????? Error en instancia {i}: {e}")
 
         metrics = self._compute_explanation_metrics()
         df = pd.read_csv(f"results/metrics_Balanced_cliente_{self.client_id}.csv")
@@ -737,8 +933,10 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         self.exp_shap_global = []
         self.exp_lime_local = []
         self.exp_lime_global = []
-        self.exp_anchor_local = []
-        self.exp_anchor_global = []
+        self.exp_anchor_testlocal_local = []
+        self.exp_anchor_testlocal_global = []
+        self.exp_anchor_testglobal_local = []
+        self.exp_anchor_testglobal_global = []
         self.exp_lore_local = []
         self.exp_lore_global = []
 
@@ -758,42 +956,33 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
     def _compute_explanation_metrics(self):
         metrics = {}
         X_test_np = np.asarray(self.X_test, dtype=np.float32)
+        only_idx_mode = len(self.exp_shap_global) == 1
+
+        def _stability_or_nan(explanations):
+            n = min(len(X_test_np), len(self.y_test), len(explanations))
+            if only_idx_mode and n < 2:
+                return np.nan
+            return ClientUtilsMixin.local_stability_score(
+                X_test_np[:n], np.asarray(self.y_test)[:n], explanations[:n], k=5
+            )
 
         # GLOBAL
-        metrics["stability_shap_global"]     = ClientUtilsMixin.stability_score(self.y_test, self.exp_shap_global)
-        metrics["stability_lime_global"]     = ClientUtilsMixin.stability_score(self.y_test, self.exp_lime_global)
-        metrics["stability_anchor_global"]   = ClientUtilsMixin.stability_score(self.y_test, self.exp_anchor_global)
-        metrics["stability_lore_global"]     = ClientUtilsMixin.stability_score(self.y_test, self.exp_lore_global)
+        metrics["stability_shap_global"]             = _stability_or_nan(self.exp_shap_global)
+        metrics["stability_lime_global"]             = _stability_or_nan(self.exp_lime_global)
+        metrics["stability_anchor_testlocal_global"] = _stability_or_nan(self.exp_anchor_testlocal_global)
+        metrics["stability_lore_global"]             = _stability_or_nan(self.exp_lore_global)
 
-        metrics["separability_shap_global"]   = ClientUtilsMixin.separability_score(self.exp_shap_global)
-        metrics["separability_lime_global"]   = ClientUtilsMixin.separability_score(self.exp_lime_global)
-        metrics["separability_anchor_global"] = ClientUtilsMixin.separability_score(self.exp_anchor_global)
-        metrics["separability_lore_global"]   = ClientUtilsMixin.separability_score(self.exp_lore_global)
-
-        metrics["similarity_shap_global"]     = ClientUtilsMixin.similarity_score(X_test_np, self.exp_shap_global)
-        metrics["similarity_lime_global"]     = ClientUtilsMixin.similarity_score(X_test_np, self.exp_lime_global)
-        metrics["similarity_anchor_global"]   = ClientUtilsMixin.similarity_score(X_test_np, self.exp_anchor_global)
-        metrics["similarity_lore_global"]     = ClientUtilsMixin.similarity_score(X_test_np, self.exp_lore_global)
-
-        metrics["ratio_has_anchor_global"] = float(np.mean([bool(a) for a in self.exp_anchor_global]))
+        metrics["ratio_has_anchor_testlocal_global"]  = float(np.mean([bool(a) for a in self.exp_anchor_testlocal_global]))
+        metrics["ratio_has_anchor_testglobal_global"] = float(np.mean([bool(a) for a in self.exp_anchor_testglobal_global]))
 
         # LOCAL
-        metrics["stability_shap_local"]     = ClientUtilsMixin.stability_score(self.y_test, self.exp_shap_local)
-        metrics["stability_lime_local"]     = ClientUtilsMixin.stability_score(self.y_test, self.exp_lime_local)
-        metrics["stability_anchor_local"]   = ClientUtilsMixin.stability_score(self.y_test, self.exp_anchor_local)
-        metrics["stability_lore_local"]     = ClientUtilsMixin.stability_score(self.y_test, self.exp_lore_local)
+        metrics["stability_shap_local"]            = _stability_or_nan(self.exp_shap_local)
+        metrics["stability_lime_local"]            = _stability_or_nan(self.exp_lime_local)
+        metrics["stability_anchor_testlocal_local"] = _stability_or_nan(self.exp_anchor_testlocal_local)
+        metrics["stability_lore_local"]            = _stability_or_nan(self.exp_lore_local)
 
-        metrics["separability_shap_local"]   = ClientUtilsMixin.separability_score(self.exp_shap_local)
-        metrics["separability_lime_local"]   = ClientUtilsMixin.separability_score(self.exp_lime_local)
-        metrics["separability_anchor_local"] = ClientUtilsMixin.separability_score(self.exp_anchor_local)
-        metrics["separability_lore_local"]   = ClientUtilsMixin.separability_score(self.exp_lore_local)
-
-        metrics["similarity_shap_local"]     = ClientUtilsMixin.similarity_score(X_test_np, self.exp_shap_local)
-        metrics["similarity_lime_local"]     = ClientUtilsMixin.similarity_score(X_test_np, self.exp_lime_local)
-        metrics["similarity_anchor_local"]   = ClientUtilsMixin.similarity_score(X_test_np, self.exp_anchor_local)
-        metrics["similarity_lore_local"]     = ClientUtilsMixin.similarity_score(X_test_np, self.exp_lore_local)
-
-        metrics["ratio_has_anchor_local"] = float(np.mean([bool(a) for a in self.exp_anchor_local]))
+        metrics["ratio_has_anchor_testlocal_local"]  = float(np.mean([bool(a) for a in self.exp_anchor_testlocal_local]))
+        metrics["ratio_has_anchor_testglobal_local"] = float(np.mean([bool(a) for a in self.exp_anchor_testglobal_local]))
 
         return metrics
 
@@ -803,14 +992,19 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
 
         mean_df = pd.DataFrame({"mean": mean_metrics, "count": count_metrics})
 
-        mean_df.loc["ratio_has_factual_globalZ", ["mean", "count"]] = [
-            df["jaccard_cov_globalZ"].notna().mean(),
-            int(df["jaccard_cov_globalZ"].notna().sum()),
+        mean_df.loc["ratio_has_factual_globalZ_LORE", ["mean", "count"]] = [
+            df["jaccard_cov_globalZ_LORE"].notna().mean(),
+            int(df["jaccard_cov_globalZ_LORE"].notna().sum()),
         ]
 
-        mean_df.loc["ratio_has_factual_localZ", ["mean", "count"]] = [
-            df["jaccard_cov_localZ"].notna().mean(),
-            int(df["jaccard_cov_localZ"].notna().sum()),
+        mean_df.loc["ratio_has_factual_localZ_LORE", ["mean", "count"]] = [
+            df["jaccard_cov_localZ_LORE"].notna().mean(),
+            int(df["jaccard_cov_localZ_LORE"].notna().sum()),
+        ]
+
+        mean_df.loc["ratio_has_factual_combinedZ_LORE", ["mean", "count"]] = [
+            df["jaccard_cov_combinedZ_LORE"].notna().mean(),
+            int(df["jaccard_cov_combinedZ_LORE"].notna().sum()),
         ]
 
         for k, v in metrics.items():
