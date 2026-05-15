@@ -414,6 +414,13 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
                 random_state=42
             )
 
+            # Rangos de features numéricas para Jaccard estructural de Anchor
+            self.feature_ranges = {
+                self.feature_names[i]: (float(self.X_train[:, i].min()), float(self.X_train[:, i].max()))
+                for i in range(len(self.feature_names))
+                if self.feature_names[i] in self.numeric_features
+            }
+
             self.anchor_explainer_testlocal_global = AnchorTabular(
                 predictor=self.bb_global.predict,
                 feature_names=self.feature_names,
@@ -664,6 +671,22 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         anchor_rules_testglobal_local, anchor_prec_testglobal_local, anchor_cov_testglobal_local = \
             Explainer_metrics.compute_anchor_all(self.anchor_explainer_testglobal_local, row, 0.85, self.feature_names)
 
+        # ── Jaccard estructural Anchor (mismo background, distinto modelo) ──
+        if pred_class_idx_local == pred_class_idx_global:
+            jaccard_anchor_struct_testlocal = Explainer_metrics.compute_structural_jaccard(
+                anchor_rules_testlocal_local, anchor_rules_testlocal_global, self.feature_ranges)
+            jaccard_anchor_struct_testglobal = Explainer_metrics.compute_structural_jaccard(
+                anchor_rules_testglobal_local, anchor_rules_testglobal_global, self.feature_ranges)
+            sim_aditiva_anchor_testlocal = Explainer_metrics.compute_additive_similarity(
+                anchor_rules_testlocal_local, anchor_rules_testlocal_global, self.feature_ranges)
+            sim_aditiva_anchor_testglobal = Explainer_metrics.compute_additive_similarity(
+                anchor_rules_testglobal_local, anchor_rules_testglobal_global, self.feature_ranges)
+        else:
+            jaccard_anchor_struct_testlocal  = np.nan
+            jaccard_anchor_struct_testglobal = np.nan
+            sim_aditiva_anchor_testlocal     = np.nan
+            sim_aditiva_anchor_testglobal    = np.nan
+
         # 10) Árboles → string
         lore_tree_local_str = self.tree_to_str(
             lore_tree_local.root,
@@ -754,10 +777,12 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             dfZ_global, rules_factual_global[0] if has_factual_global else None
         )
 
-        if not has_factual:
+        if not has_factual or pred_class_idx_local != pred_class_idx_global:
             jaccard_cov_global = covL_g = covG_g = covInter_g = covUnion_g = np.nan
             jaccard_cov_local  = covL_l = covG_l = covInter_l = covUnion_l = np.nan
             jaccard_cov_combined = covL_c = covG_c = covInter_c = covUnion_c = np.nan
+            jaccard_lore_struct  = np.nan
+            sim_aditiva_lore     = np.nan
         else:
             dfZ_combined = pd.concat([dfZ_local, dfZ_global], ignore_index=True)
             jaccard_cov_global, covL_g, covG_g, covInter_g, covUnion_g = \
@@ -766,7 +791,13 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
                 Explainer_metrics.compute_rule_overlap(dfZ_local, rules_factual_local[0], rules_factual_global[0])
             jaccard_cov_combined, covL_c, covG_c, covInter_c, covUnion_c = \
                 Explainer_metrics.compute_rule_overlap(dfZ_combined, rules_factual_local[0], rules_factual_global[0])
-            
+            jaccard_lore_struct = Explainer_metrics.compute_structural_jaccard(
+                rules_factual_local[0], rules_factual_global[0], self.feature_ranges
+            )
+            sim_aditiva_lore = Explainer_metrics.compute_additive_similarity(
+                rules_factual_local[0], rules_factual_global[0], self.feature_ranges
+            )
+
         # ── Cross-explainer consistency (comentado) ──
         # def _extract_feature_names(rules, feature_names):
         #     feats = set()
@@ -888,10 +919,18 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             "covInter_combinedZ_LORE":    float(covInter_c),
             "covUnion_combinedZ_LORE":    float(covUnion_c),
 
+            "jaccard_lore_struct":        float(jaccard_lore_struct),
+            "sim_aditiva_lore":           float(sim_aditiva_lore),
+
             "delta_lime_testlocal":          float(delta_lime_testlocal),
             "delta_lime_testglobal":         float(delta_lime_testglobal),
             "delta_shap_testlocal":          float(delta_shap_testlocal),
             "delta_shap_testglobal":         float(delta_shap_testglobal),
+
+            "jaccard_anchor_struct_testlocal":  float(jaccard_anchor_struct_testlocal),
+            "jaccard_anchor_struct_testglobal": float(jaccard_anchor_struct_testglobal),
+            "sim_aditiva_anchor_testlocal":     float(sim_aditiva_anchor_testlocal),
+            "sim_aditiva_anchor_testglobal":    float(sim_aditiva_anchor_testglobal),
 
             "anchor_prec_testlocal_local":   float(anchor_prec_testlocal_local),
             "anchor_prec_testlocal_global":  float(anchor_prec_testlocal_global),
