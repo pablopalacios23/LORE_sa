@@ -254,7 +254,6 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
                     acc_train_load = accuracy_score(self.y_train_nn, bb_local_tmp.predict(self.X_train))
                 self.local_trained = True
             else:
-                self.nn_model_local = copy.deepcopy(self.nn_model_global)
                 self._train_nn(self.nn_model_local, epochs=80, lr=1e-3)
                 self.nn_model_local.eval()
                 bb_local_tmp = TorchNNWrapper(self.nn_model_local, self.num_idx,
