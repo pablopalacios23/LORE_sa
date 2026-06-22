@@ -532,6 +532,7 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         )
 
         lore_tree_global = explanation_global["merged_tree"]
+        ratio_opposite_neighborhood_global = explanation_global["ratio_opposite_neighborhood"]
         Z_global_norm = explanation_global["neighborhood_Z"]
         y_bb_global = explanation_global["neighborhood_Yb"]
         # Desnormalizar Z para coverage y reglas (espacio raw)
@@ -599,6 +600,7 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         )
 
         lore_tree_local = explanation_local["merged_tree"]
+        ratio_opposite_neighborhood_local = explanation_local["ratio_opposite_neighborhood"]
         Z_local_norm = explanation_local["neighborhood_Z"]
         y_bb_local = explanation_local["neighborhood_Yb"]
         # Desnormalizar Z para coverage y reglas (espacio raw)
@@ -779,17 +781,13 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
         if not has_factual or pred_class_idx_local != pred_class_idx_global:
             jaccard_cov_global = covL_g = covG_g = covInter_g = covUnion_g = np.nan
             jaccard_cov_local  = covL_l = covG_l = covInter_l = covUnion_l = np.nan
-            jaccard_cov_combined = covL_c = covG_c = covInter_c = covUnion_c = np.nan
             jaccard_lore_struct  = np.nan
             sim_aditiva_lore     = np.nan
         else:
-            dfZ_combined = pd.concat([dfZ_local, dfZ_global], ignore_index=True)
             jaccard_cov_global, covL_g, covG_g, covInter_g, covUnion_g = \
                 Explainer_metrics.compute_rule_overlap(dfZ_global, rules_factual_local[0], rules_factual_global[0])
             jaccard_cov_local, covL_l, covG_l, covInter_l, covUnion_l = \
                 Explainer_metrics.compute_rule_overlap(dfZ_local, rules_factual_local[0], rules_factual_global[0])
-            jaccard_cov_combined, covL_c, covG_c, covInter_c, covUnion_c = \
-                Explainer_metrics.compute_rule_overlap(dfZ_combined, rules_factual_local[0], rules_factual_global[0])
             jaccard_lore_struct = Explainer_metrics.compute_structural_jaccard(
                 rules_factual_local[0], rules_factual_global[0], self.feature_ranges
             )
@@ -900,6 +898,9 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
 
             "has_factual_local":  int(has_factual_local),
             "has_factual_global": int(has_factual_global),
+            "model_disagreement": int(pred_class_idx_local != pred_class_idx_global),
+            "ratio_opposite_neighborhood_local":  float(ratio_opposite_neighborhood_local),
+            "ratio_opposite_neighborhood_global": float(ratio_opposite_neighborhood_global),
             "cov_ruleLocal_on_localZ_LORE":   float(cov_ruleLocal_on_localZ),
             "cov_ruleLocal_on_globalZ_LORE":  float(cov_ruleLocal_on_globalZ),
             "cov_ruleGlobal_on_localZ_LORE":  float(cov_ruleGlobal_on_localZ),
@@ -913,10 +914,6 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
             "jaccard_cov_localZ_LORE": float(jaccard_cov_local),
             "covInter_localZ_LORE":    float(covInter_l),
             "covUnion_localZ_LORE":    float(covUnion_l),
-
-            "jaccard_cov_combinedZ_LORE": float(jaccard_cov_combined),
-            "covInter_combinedZ_LORE":    float(covInter_c),
-            "covUnion_combinedZ_LORE":    float(covUnion_c),
 
             "jaccard_lore_struct":        float(jaccard_lore_struct),
             "sim_aditiva_lore":           float(sim_aditiva_lore),
@@ -1030,19 +1027,49 @@ class FlowerClient(NumPyClient, ClientUtilsMixin):
 
         mean_df = pd.DataFrame({"mean": mean_metrics, "count": count_metrics})
 
+        n_total = len(df)
+
         mean_df.loc["ratio_has_factual_globalZ_LORE", ["mean", "count"]] = [
             df["jaccard_cov_globalZ_LORE"].notna().mean(),
-            int(df["jaccard_cov_globalZ_LORE"].notna().sum()),
+            n_total,
         ]
 
         mean_df.loc["ratio_has_factual_localZ_LORE", ["mean", "count"]] = [
             df["jaccard_cov_localZ_LORE"].notna().mean(),
-            int(df["jaccard_cov_localZ_LORE"].notna().sum()),
+            n_total,
         ]
 
-        mean_df.loc["ratio_has_factual_combinedZ_LORE", ["mean", "count"]] = [
-            df["jaccard_cov_combinedZ_LORE"].notna().mean(),
-            int(df["jaccard_cov_combinedZ_LORE"].notna().sum()),
+        # Fracción de instancias donde local y global predicen clase distinta
+        mean_df.loc["ratio_model_disagreement", ["mean", "count"]] = [
+            df["model_disagreement"].mean(),
+            n_total,
+        ]
+
+        # Descomposición mutuamente exclusiva de causas de fallo
+        monoclase     = (df["has_factual_local"] == 0) | (df["has_factual_global"] == 0)
+        disagreement  = df["model_disagreement"] == 1
+        mean_df.loc["ratio_fail_monoclase_only",    ["mean", "count"]] = [
+            (monoclase & ~disagreement).mean(), n_total,
+        ]
+        mean_df.loc["ratio_fail_disagreement_only", ["mean", "count"]] = [
+            (~monoclase & disagreement).mean(), n_total,
+        ]
+        mean_df.loc["ratio_fail_both_causes",       ["mean", "count"]] = [
+            (monoclase & disagreement).mean(),  n_total,
+        ]
+
+        # Causa del vecindario monoclase: geométrico vs distorsión Non-IID
+        fail_local_only  = (df["has_factual_local"] == 0) & (df["has_factual_global"] == 1)
+        fail_global_only = (df["has_factual_local"] == 1) & (df["has_factual_global"] == 0)
+        fail_both_mono   = (df["has_factual_local"] == 0) & (df["has_factual_global"] == 0)
+        mean_df.loc["ratio_fail_noniid_local",  ["mean", "count"]] = [
+            fail_local_only.mean(),  n_total,
+        ]
+        mean_df.loc["ratio_fail_global_only",   ["mean", "count"]] = [
+            fail_global_only.mean(), n_total,
+        ]
+        mean_df.loc["ratio_fail_geometric",     ["mean", "count"]] = [
+            fail_both_mono.mean(),   n_total,
         ]
 
         for k, v in metrics.items():

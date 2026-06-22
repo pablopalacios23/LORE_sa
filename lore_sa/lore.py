@@ -114,6 +114,11 @@ class Lore(object):
 
         neighb_train_y = self.bbox.predict(neighb_train_X) # ETIQUETAMOS EL VECINDARIO A PARTIR DEL BLACKBOX (RED NEURONAL)
 
+        # Fracción de instancias del vecindario con clase contraria a x (causa directa del fallo de LORE)
+        pred_class_x   = self.bbox.predict(x.reshape(1, -1))[0]
+        n_opposite     = int(np.sum(neighb_train_y != pred_class_x))
+        ratio_opposite = float(n_opposite / len(neighb_train_y)) if len(neighb_train_y) > 0 else 0.0
+
         neighb_train_yb = self.encoder.encode_target_class(neighb_train_y.reshape(-1, 1), categories_global=UNIQUE_LABELS).squeeze()
 
 
@@ -162,7 +167,8 @@ class Lore(object):
             return {
                 "rule": None,
                 "counterfactuals": [],
-                "merged_tree": None
+                "merged_tree": None,
+                "ratio_opposite_neighborhood": ratio_opposite,
             }
 
         # 👉 Si se hace merge (solo en servidor)
@@ -182,6 +188,7 @@ class Lore(object):
             'neighborhood_Z': neighbour,
             'neighborhood_Yb': neighb_train_yb,
             'surrogate_preds': y_surrogate,
+            'ratio_opposite_neighborhood': ratio_opposite,
         }
 
 
